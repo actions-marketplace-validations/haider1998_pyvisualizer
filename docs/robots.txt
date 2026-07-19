@@ -1,7 +1,39 @@
-# PyVisualizer Website
-# https://haider1998.github.io/pyvisualizer/
+# py-code-visualizer — https://haider1998.github.io/pyvisualizer/
+# We welcome AI/answer-engine crawlers. Machine-readable facts: /llms.txt
 
 User-agent: *
 Allow: /
+
+# Explicitly welcome major AI crawlers (retrieval + answer engines)
+User-agent: GPTBot
+Allow: /
+
+User-agent: OAI-SearchBot
+Allow: /
+
+User-agent: ChatGPT-User
+Allow: /
+
+User-agent: ClaudeBot
+Allow: /
+
+User-agent: anthropic-ai
+Allow: /
+
+User-agent: PerplexityBot
+Allow: /
+
+User-agent: Google-Extended
+Allow: /
+
+User-agent: Applebot-Extended
+Allow: /
+
+User-agent: CCBot
+Allow: /
+
+# LLM fact sheet (llms.txt convention):
+#   /llms.txt        concise
+#   /llms-full.txt   full reference
 
 Sitemap: https://haider1998.github.io/pyvisualizer/sitemap.xml

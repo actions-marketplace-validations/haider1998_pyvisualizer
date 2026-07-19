@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Playground — py-code-visualizer (analyze Python in your browser)</title>
+<meta name="description" content="Drop a Python file and see its call graph rendered live in your browser. Nothing is uploaded — analysis runs entirely on your machine. Powered by py-code-visualizer.">
+<link rel="canonical" href="https://haider1998.github.io/pyvisualizer/playground.html">
+<style>
+:root{
+  --bg:#0b0f17; --panel:#131926; --panel2:#1b2434; --border:#2a3446;
+  --text:#e6edf3; --muted:#8b98ad; --accent:#7c3aed; --accent2:#2f81f7;
+  --edge:#3d4759; --edge-amb:#d29922;
+  --k-function:#3fb950; --k-method:#2f81f7; --k-constructor:#f85149;
+  --k-async:#a371f7; --k-property:#db61a2;
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--text);
+  font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;overflow:hidden}
+#app{display:flex;flex-direction:column;height:100vh}
+header{display:flex;align-items:center;gap:14px;padding:12px 18px;background:var(--panel);
+  border-bottom:1px solid var(--border);flex-wrap:wrap}
+header .brand{font-weight:700;font-size:15px;display:flex;gap:8px;align-items:center}
+header .brand a{color:var(--accent2);text-decoration:none}
+.badge{font-size:11px;color:var(--muted);border:1px solid var(--border);border-radius:20px;padding:3px 10px}
+.spacer{flex:1}
+button,label.btn{font:inherit;font-size:13px;color:var(--text);background:var(--panel2);
+  border:1px solid var(--border);border-radius:8px;padding:7px 13px;cursor:pointer;transition:.15s}
+button:hover,label.btn:hover{border-color:var(--accent2)}
+.btn-primary{background:var(--accent);border-color:var(--accent);color:#fff}
+input[type=search]{font:inherit;font-size:13px;color:var(--text);background:var(--panel2);
+  border:1px solid var(--border);border-radius:8px;padding:7px 12px;outline:none;min-width:170px}
+#main{flex:1;position:relative;overflow:hidden}
+#graph{width:100%;height:100%;display:block;cursor:grab}
+#graph.grabbing{cursor:grabbing}
+.node circle{stroke:var(--bg);stroke-width:1.5px;cursor:pointer}
+.node text{font-size:10px;fill:var(--text);pointer-events:none;paint-order:stroke;stroke:var(--bg);stroke-width:3px;stroke-linejoin:round}
+.link{fill:none;stroke:var(--edge);stroke-width:1.2px;opacity:.55}
+.link.amb{stroke:var(--edge-amb);stroke-dasharray:4 3}
+.dim{opacity:.08}
+.hl circle{stroke:var(--accent2);stroke-width:3px}
+#drop{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;flex-direction:column;
+  gap:14px;background:rgba(11,15,23,.86);z-index:10;text-align:center;padding:24px}
+#drop.hide{display:none}
+#drop h1{font-size:26px;margin:0}
+#drop p{color:var(--muted);max-width:560px;line-height:1.6;margin:.2rem 0}
+#drop .zone{border:2px dashed var(--border);border-radius:18px;padding:38px 54px;transition:.2s;background:var(--panel)}
+#drop.dragover .zone{border-color:var(--accent);background:rgba(124,58,237,.08)}
+#drop .row{display:flex;gap:12px;flex-wrap:wrap;justify-content:center;margin-top:6px}
+.note{position:absolute;bottom:12px;left:12px;font-size:11px;color:var(--muted);background:var(--panel);
+  border:1px solid var(--border);border-radius:8px;padding:7px 11px;max-width:340px;line-height:1.5}
+#legend{position:absolute;top:12px;right:12px;background:var(--panel);border:1px solid var(--border);
+  border-radius:10px;padding:10px 12px;font-size:11px;display:flex;flex-direction:column;gap:5px}
+#legend .li{display:flex;align-items:center;gap:7px;color:var(--muted)}
+#legend .dot{width:10px;height:10px;border-radius:50%}
+#legend .ln{width:16px;border-top:2px solid}
+.tip{position:absolute;top:12px;left:12px;font-size:11px;color:var(--muted)}
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <span class="brand">🗺️ <a href="index.html">py-code-visualizer</a> · Playground</span>
+    <span class="badge" id="stat">drop a .py file to begin</span>
+    <div class="spacer"></div>
+    <input type="search" id="search" placeholder="Search functions… (/)">
+    <label class="btn" for="fileInput">📂 Open .py file(s)</label>
+    <input id="fileInput" type="file" accept=".py" multiple hidden>
+    <button id="sampleBtn" class="btn-primary">▶ Load sample project</button>
+    <button id="fitBtn">Fit</button>
+  </header>
+  <div id="main">
+    <svg id="graph"></svg>
+    <div class="tip" id="tip" style="display:none">Drag to pan · scroll to zoom · click a node</div>
+    <div id="legend" style="display:none">
+      <div class="li"><span class="dot" style="background:var(--k-function)"></span>Function</div>
+      <div class="li"><span class="dot" style="background:var(--k-method)"></span>Method</div>
+      <div class="li"><span class="dot" style="background:var(--k-constructor)"></span>Constructor</div>
+      <div class="li"><span class="dot" style="background:var(--k-async)"></span>Async</div>
+      <div class="li"><span class="ln" style="border-color:var(--edge-amb);border-style:dashed"></span>Ambiguous</div>
+    </div>
+    <div class="note" id="note" style="display:none">
+      🔒 This runs a lightweight analyzer <strong>entirely in your browser</strong> — your code is never uploaded.
+      The full <code>pip install py-code-visualizer</code> uses complete AST analysis with MRO resolution,
+      confidence tagging, and file:line provenance.
+    </div>
+    <div id="drop">
+      <div class="zone">
+        <h1>🗺️ See your Python architecture — instantly</h1>
+        <p>Drop a <code>.py</code> file (or several) here. It's analyzed <strong>on your machine</strong>;
+          nothing is uploaded. This is a browser taste of what the full tool does with complete AST analysis.</p>
+        <div class="row">
+          <label class="btn" for="fileInput">📂 Choose .py file(s)</label>
+          <button id="sampleBtn2" class="btn-primary">▶ Load sample project</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+<script>
+"use strict";
+const SVGNS="http://www.w3.org/2000/svg";
+const KIND_COLORS={function:"--k-function",method:"--k-method",constructor:"--k-constructor",async:"--k-async",property:"--k-property"};
+function cssv(v){return getComputedStyle(document.documentElement).getPropertyValue(v).trim();}
+const KEYWORDS=new Set(["if","elif","else","for","while","with","try","except","finally","return","yield","print","assert","raise","and","or","not","in","is","lambda","await","super","len","range","str","int","list","dict","set","tuple","isinstance","enumerate","open","zip","map","filter","sorted","min","max","sum","any","all","type","getattr","setattr","hasattr"]);
+
+// ---- Lightweight Python analyzer (browser taste of the real AST engine) ----
+function analyze(files){
+  const defs=[];                 // {id,name,module,cls,kind,file}
+  const byShort={};              // short -> [ids]
+  const rawCalls=[];             // {caller, short}
+  for(const f of files){
+    const module=f.name.replace(/\.py$/,"").replace(/\//g,".");
+    const lines=f.text.split(/\r?\n/);
+    // scope stack: {indent, type, qual, cls}
+    const stack=[{indent:-1,type:"module",qual:module,cls:null}];
+    const curFunc=()=>{for(let i=stack.length-1;i>=0;i--)if(stack[i].type==="function")return stack[i].qual;return null;};
+    for(let raw of lines){
+      const line=raw.replace(/\t/g,"    ");
+      const stripped=line.replace(/^\s+/,"");
+      if(!stripped||stripped.startsWith("#"))continue;
+      const indent=line.length-stripped.length;
+      while(stack.length>1 && indent<=stack[stack.length-1].indent) stack.pop();
+      const top=stack[stack.length-1];
+      const cls=stripped.match(/^class\s+([A-Za-z_]\w*)\s*(\([^)]*\))?\s*:/);
+      const fn=stripped.match(/^(async\s+)?def\s+([A-Za-z_]\w*)\s*\(([^)]*)\)/);
+      if(cls){
+        const qual=top.qual+"."+cls[1];
+        stack.push({indent,type:"class",qual,cls:qual});
+        continue;
+      }
+      if(fn){
+        const name=fn[2];
+        const isMethod=top.type==="class";
+        const qual=top.qual+"."+name;
+        let kind="function";
+        if(name==="__init__"||name==="__new__")kind="constructor";
+        else if(fn[1])kind="async";
+        else if(isMethod)kind="method";
+        const id=qual;
+        if(!defs.find(d=>d.id===id)){
+          defs.push({id,name,module,cls:isMethod?top.qual:null,kind,file:f.name});
+          (byShort[name]=byShort[name]||[]).push(id);
+        }
+        stack.push({indent,type:"function",qual,cls:isMethod?top.qual:top.cls});
+        continue;
+      }
+      // record call sites inside a function
+      const caller=curFunc();
+      if(!caller)continue;
+      const re=/(?:([A-Za-z_]\w*)\s*\.\s*)?([A-Za-z_]\w*)\s*\(/g;
+      let m;
+      while((m=re.exec(stripped))){
+        const short=m[2];
+        if(KEYWORDS.has(short))continue;
+        // skip the def line's own name already handled; skip if it's a keyword-y construct
+        rawCalls.push({caller,short});
+      }
+    }
+  }
+  // resolve calls by short name against known defs
+  const nodes=defs.map(d=>({...d}));
+  const idset=new Set(nodes.map(n=>n.id));
+  const edgeMap=new Map();
+  let ambiguous=0;
+  for(const c of rawCalls){
+    const cands=byShort[c.short];
+    if(!cands||!cands.length)continue;         // external / builtin -> no invented edge
+    if(cands.length===1 && cands[0]===c.caller)continue; // self recursion noise
+    let target,amb=false;
+    if(cands.length===1){target=cands[0];}
+    else{
+      // prefer same class/module as caller, else ambiguous
+      const callerMod=c.caller.split(".")[0];
+      const same=cands.filter(x=>x.startsWith(callerMod+"."));
+      if(same.length===1)target=same[0];
+      else{target=cands.slice().sort()[0];amb=true;}
+    }
+    if(target===c.caller)continue;
+    const key=c.caller+"|"+target;
+    if(!edgeMap.has(key)){edgeMap.set(key,{source:c.caller,target,amb});if(amb)ambiguous++;}
+  }
+  return {nodes,links:[...edgeMap.values()],ambiguous};
+}
+
+// ---- Force renderer ----
+const svg=document.getElementById("graph");
+const root=document.createElementNS(SVGNS,"g");
+const gLinks=document.createElementNS(SVGNS,"g");
+const gNodes=document.createElementNS(SVGNS,"g");
+root.appendChild(gLinks);root.appendChild(gNodes);svg.appendChild(root);
+let W=0,H=0,model={nodes:[],links:[]},sim=null,selected=null;
+const view={x:0,y:0,k:1};
+function resize(){const r=svg.getBoundingClientRect();W=r.width;H=r.height;svg.setAttribute("viewBox",`0 0 ${W} ${H}`);}
+window.addEventListener("resize",resize);
+
+function ensureDefs(){
+  if(svg.querySelector("defs"))return;
+  const defs=document.createElementNS(SVGNS,"defs");
+  const mk=document.createElementNS(SVGNS,"marker");
+  mk.id="arrow";mk.setAttribute("viewBox","0 0 10 10");mk.setAttribute("refX","9");mk.setAttribute("refY","5");
+  mk.setAttribute("markerWidth","6");mk.setAttribute("markerHeight","6");mk.setAttribute("orient","auto-start-reverse");
+  const p=document.createElementNS(SVGNS,"path");p.setAttribute("d","M0,0 L10,5 L0,10 z");p.setAttribute("fill",cssv("--edge"));
+  mk.appendChild(p);defs.appendChild(mk);svg.appendChild(defs);
+}
+let degree=new Map();
+function radius(n){return Math.min(5+(degree.get(n.id)||0)*1.3,16);}
+function build(){
+  gLinks.innerHTML="";gNodes.innerHTML="";ensureDefs();
+  degree=new Map(model.nodes.map(n=>[n.id,0]));
+  for(const l of model.links){degree.set(l.source,(degree.get(l.source)||0)+1);degree.set(l.target,(degree.get(l.target)||0)+1);}
+  for(const l of model.links){const p=document.createElementNS(SVGNS,"path");
+    p.setAttribute("class","link"+(l.amb?" amb":""));p.setAttribute("marker-end","url(#arrow)");l.el=p;gLinks.appendChild(p);}
+  for(const n of model.nodes){const g=document.createElementNS(SVGNS,"g");g.setAttribute("class","node");
+    const c=document.createElementNS(SVGNS,"circle");c.setAttribute("r",radius(n));
+    c.setAttribute("fill",cssv(KIND_COLORS[n.kind]||"--k-function"));
+    const t=document.createElementNS(SVGNS,"text");t.setAttribute("x",radius(n)+3);t.setAttribute("y",3);t.textContent=n.name;
+    g.appendChild(c);g.appendChild(t);n.el=g;gNodes.appendChild(g);
+    g.addEventListener("click",e=>{e.stopPropagation();highlight(n.id);});
+    drag(g,n);}
+}
+function byId(id){return model.nodes.find(n=>n.id===id);}
+function layout(){
+  const nodes=model.nodes,links=model.links,idx=new Map(nodes.map((n,i)=>[n.id,i]));
+  const spread=Math.max(30,520/Math.sqrt(nodes.length+1));
+  nodes.forEach((n,i)=>{if(n.x===undefined){const a=i*2.399,r=40+Math.sqrt(i)*spread*0.9;n.x=W/2+Math.cos(a)*r;n.y=H/2+Math.sin(a)*r;}n.vx=0;n.vy=0;});
+  const repel=nodes.length<40?5200:3200,rest=nodes.length<40?150:95;let alpha=1;
+  function tick(){
+    alpha*=0.985;
+    for(let i=0;i<nodes.length;i++){const a=nodes[i];for(let j=i+1;j<nodes.length;j++){const b=nodes[j];
+      let dx=a.x-b.x,dy=a.y-b.y,d2=dx*dx+dy*dy+.01,f=repel/d2,d=Math.sqrt(d2),fx=dx/d*f,fy=dy/d*f;
+      a.vx+=fx;a.vy+=fy;b.vx-=fx;b.vy-=fy;}}
+    for(const l of links){const a=nodes[idx.get(l.source)],b=nodes[idx.get(l.target)];if(!a||!b)continue;
+      let dx=b.x-a.x,dy=b.y-a.y,d=Math.sqrt(dx*dx+dy*dy)+.01,f=(d-rest)*.02,fx=dx/d*f,fy=dy/d*f;
+      a.vx+=fx;a.vy+=fy;b.vx-=fx;b.vy-=fy;}
+    for(const n of nodes){n.vx+=(W/2-n.x)*.0006;n.vy+=(H/2-n.y)*.0006;
+      if(n.fx!=null){n.x=n.fx;n.y=n.fy;}else{n.x+=n.vx*alpha;n.y+=n.vy*alpha;}n.vx*=.86;n.vy*=.86;}
+    positions();
+    if(alpha>.02)sim=requestAnimationFrame(tick);else sim=null;
+  }
+  if(sim)cancelAnimationFrame(sim);sim=requestAnimationFrame(tick);
+}
+function positions(){
+  for(const l of model.links){const a=byId(l.source),b=byId(l.target);if(!a||!b)continue;
+    const r=radius(b)+7;let dx=b.x-a.x,dy=b.y-a.y,d=Math.sqrt(dx*dx+dy*dy)||1,ex=b.x-dx/d*r,ey=b.y-dy/d*r;
+    l.el.setAttribute("d",`M${a.x},${a.y} L${ex},${ey}`);}
+  for(const n of model.nodes)n.el.setAttribute("transform",`translate(${n.x},${n.y})`);
+}
+function applyView(){root.setAttribute("transform",`translate(${view.x},${view.y}) scale(${view.k})`);}
+function fit(){if(!model.nodes.length)return;const xs=model.nodes.map(n=>n.x),ys=model.nodes.map(n=>n.y);
+  const minX=Math.min(...xs),maxX=Math.max(...xs),minY=Math.min(...ys),maxY=Math.max(...ys);
+  const gw=maxX-minX+120,gh=maxY-minY+120;view.k=Math.min(W/gw,H/gh,2);
+  view.x=W/2-((minX+maxX)/2)*view.k;view.y=H/2-((minY+maxY)/2)*view.k;applyView();}
+function highlight(id){selected=id;const keep=new Set([id]);
+  for(const l of model.links){if(l.source===id)keep.add(l.target);if(l.target===id)keep.add(l.source);}
+  model.nodes.forEach(n=>{n.el.classList.toggle("dim",!keep.has(n.id));n.el.classList.toggle("hl",n.id===id);});
+  model.links.forEach(l=>l.el.classList.toggle("dim",!(l.source===id||l.target===id)));}
+function clearHl(){selected=null;model.nodes.forEach(n=>n.el.classList.remove("dim","hl"));model.links.forEach(l=>l.el.classList.remove("dim"));}
+svg.addEventListener("click",clearHl);
+// pan/zoom/drag
+svg.addEventListener("wheel",e=>{e.preventDefault();const s=e.deltaY<0?1.1:.9;const mx=e.offsetX,my=e.offsetY;
+  view.x=mx-(mx-view.x)*s;view.y=my-(my-view.y)*s;view.k*=s;applyView();},{passive:false});
+let pan=false,px=0,py=0;
+svg.addEventListener("mousedown",e=>{if(e.target.closest(".node"))return;pan=true;px=e.clientX;py=e.clientY;svg.classList.add("grabbing");});
+window.addEventListener("mousemove",e=>{if(!pan)return;view.x+=e.clientX-px;view.y+=e.clientY-py;px=e.clientX;py=e.clientY;applyView();});
+window.addEventListener("mouseup",()=>{pan=false;svg.classList.remove("grabbing");});
+function drag(g,n){let d=false;g.addEventListener("mousedown",e=>{e.stopPropagation();d=true;n.fx=n.x;n.fy=n.y;});
+  window.addEventListener("mousemove",e=>{if(!d)return;n.fx+=e.movementX/view.k;n.fy+=e.movementY/view.k;n.x=n.fx;n.y=n.fy;positions();});
+  window.addEventListener("mouseup",()=>{if(d){d=false;n.fx=null;n.fy=null;if(!sim)layout();}});}
+
+function render(result){
+  model=result;model.nodes.forEach(n=>n.x=undefined);
+  document.getElementById("drop").classList.add("hide");
+  document.getElementById("legend").style.display="";
+  document.getElementById("note").style.display="";
+  document.getElementById("tip").style.display="";
+  document.getElementById("stat").textContent=
+    `${model.nodes.length} functions · ${model.links.length} calls`+(result.ambiguous?` · ${result.ambiguous} ambiguous`:"");
+  resize();build();layout();setTimeout(fit,420);
+}
+
+// ---- Input handling ----
+const drop=document.getElementById("drop");
+["dragenter","dragover"].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.add("dragover");}));
+["dragleave","drop"].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.remove("dragover");}));
+window.addEventListener("dragover",e=>e.preventDefault());
+window.addEventListener("drop",e=>{e.preventDefault();if(e.dataTransfer&&e.dataTransfer.files.length)readFiles(e.dataTransfer.files);});
+document.getElementById("fileInput").addEventListener("change",e=>readFiles(e.target.files));
+function readFiles(fileList){
+  const files=[...fileList].filter(f=>f.name.endsWith(".py"));
+  if(!files.length)return;
+  let pending=files.length;const out=[];
+  files.forEach(f=>{const r=new FileReader();r.onload=()=>{out.push({name:f.name,text:r.result});if(--pending===0)render(analyze(out));};r.readAsText(f);});
+}
+document.getElementById("search").addEventListener("input",e=>{const q=e.target.value.toLowerCase().trim();
+  if(!q){clearHl();return;}let first=null;
+  model.nodes.forEach(n=>{const hit=n.id.toLowerCase().includes(q);n.el.classList.toggle("dim",!hit);n.el.classList.toggle("hl",hit);if(hit&&!first)first=n;});
+  model.links.forEach(l=>l.el.classList.add("dim"));});
+document.getElementById("fitBtn").addEventListener("click",fit);
+window.addEventListener("keydown",e=>{if(e.key==="/"&&document.activeElement.tagName!=="INPUT"){e.preventDefault();document.getElementById("search").focus();}});
+
+// ---- Sample project ----
+const SAMPLE=[
+  {name:"main.py",text:`from services import UserService, EmailService
+
+class App:
+    def __init__(self):
+        self.users = UserService()
+        self.mailer = EmailService()
+
+    def run(self):
+        user = self.users.create("ada")
+        self.users.promote(user)
+        self.mailer.welcome(user)
+
+def main():
+    app = App()
+    app.run()
+`},
+  {name:"services.py",text:`from db import Database
+
+class UserService:
+    def __init__(self):
+        self.db = Database()
+
+    def create(self, name):
+        self.db.insert(name)
+        return name
+
+    def promote(self, user):
+        self.db.update(user)
+
+class EmailService:
+    def welcome(self, user):
+        self.render(user)
+        self.send(user)
+
+    def render(self, user):
+        pass
+
+    def send(self, user):
+        pass
+`},
+  {name:"db.py",text:`class Database:
+    def insert(self, row):
+        self._write(row)
+
+    def update(self, row):
+        self._write(row)
+
+    def _write(self, row):
+        pass
+`}
+];
+function loadSample(){render(analyze(SAMPLE));}
+document.getElementById("sampleBtn").addEventListener("click",loadSample);
+document.getElementById("sampleBtn2").addEventListener("click",loadSample);
+
+resize();
+</script>
+</body>
+</html>

@@ -5,41 +5,123 @@ This module provides functions to generate Mermaid flowcharts and
 interactive HTML viewers for code architecture diagrams.
 """
 
-import os
 import logging
-from typing import Dict, List, Any
+import os
+import re
+from typing import Any, Dict, List, Tuple
 
 import networkx as nx
+
+from pyvisualizer.core.model import CONFIDENCE_AMBIGUOUS
 
 logger = logging.getLogger("pyvisualizer.mermaid")
 
 # Color palette for different node types
 COLORS = {
-    'module': {'primary': '#5D2E8C', 'secondary': '#7B4BAF'},
-    'class': {'primary': '#2962FF', 'secondary': '#5C8AFF'},
-    'constructor': {'primary': '#E53935', 'secondary': '#EF5350'},
-    'method': {'primary': '#00C853', 'secondary': '#4CD964'},
-    'async': {'primary': '#AA00FF', 'secondary': '#CE93D8'},
-    'property': {'primary': '#FF6D00', 'secondary': '#FFAB40'},
-    'static': {'primary': '#00B0FF', 'secondary': '#80D8FF'},
-    'private': {'primary': '#757575', 'secondary': '#BDBDBD'}
+    "module": {"primary": "#5D2E8C", "secondary": "#7B4BAF"},
+    "class": {"primary": "#2962FF", "secondary": "#5C8AFF"},
+    "constructor": {"primary": "#E53935", "secondary": "#EF5350"},
+    "method": {"primary": "#00C853", "secondary": "#4CD964"},
+    "async": {"primary": "#AA00FF", "secondary": "#CE93D8"},
+    "property": {"primary": "#FF6D00", "secondary": "#FFAB40"},
+    "static": {"primary": "#00B0FF", "secondary": "#80D8FF"},
+    "private": {"primary": "#757575", "secondary": "#BDBDBD"},
 }
+
+
+def _mermaid_label(text: str) -> str:
+    """Sanitize a label for safe embedding in a Mermaid node."""
+    text = text.replace('"', "'").replace("`", "'")
+    text = re.sub(r"[\r\n]+", " ", text)
+    return text
+
+
+def _rollup(
+    G: nx.DiGraph, detail: str
+) -> Tuple[Dict[str, Dict[str, Any]], Dict[Tuple[str, str], bool]]:
+    """Aggregate the call graph to a coarser granularity.
+
+    Returns ``(groups, edges)`` where ``groups`` maps a group key to metadata
+    ``{label, module}`` and ``edges`` maps ``(src_key, dst_key)`` to a bool that
+    is True when *every* underlying edge is ambiguous (render dashed).
+    """
+
+    def key_for(node: str) -> Tuple[str, str]:
+        data = G.nodes[node]
+        module = data.get("module", node.rsplit(".", 1)[0])
+        if detail == "module":
+            return module, module.split(".")[-1]
+        if detail == "class":
+            cls = data.get("class")
+            if cls:
+                return cls, cls.split(".")[-1]
+            return f"{module}.<functions>", f"{module.split('.')[-1]} ()"
+        return node, node.split(".")[-1]
+
+    groups: Dict[str, Dict[str, Any]] = {}
+    node_to_key: Dict[str, str] = {}
+    for node in sorted(G.nodes()):
+        gkey, label = key_for(node)
+        node_to_key[node] = gkey
+        if gkey not in groups:
+            groups[gkey] = {"label": label, "module": G.nodes[node].get("module", "")}
+
+    edge_ambig: Dict[Tuple[str, str], bool] = {}
+    for s, t, d in G.edges(data=True):
+        sk, tk = node_to_key[s], node_to_key[t]
+        if sk == tk:
+            continue  # collapse intra-group calls
+        amb = d.get("confidence") == CONFIDENCE_AMBIGUOUS
+        if (sk, tk) in edge_ambig:
+            edge_ambig[(sk, tk)] = edge_ambig[(sk, tk)] and amb
+        else:
+            edge_ambig[(sk, tk)] = amb
+    return groups, edge_ambig
+
+
+def generate_github_mermaid(
+    G: nx.DiGraph,
+    detail: str = "module",
+    direction: str = "LR",
+) -> str:
+    """Generate a clean, GitHub-native Mermaid flowchart.
+
+    Deterministic and free of Font-Awesome icons or floating title nodes (which
+    render as literal junk on github.com). ``detail`` selects the granularity:
+    ``module`` (macro), ``class``, or ``function`` (micro). Ambiguous-only
+    relationships are drawn dashed to signal lower confidence honestly.
+    """
+    if detail not in ("module", "class", "function"):
+        detail = "module"
+
+    groups, edges = _rollup(G, detail)
+
+    lines: List[str] = [f"flowchart {direction}"]
+    ids: Dict[str, str] = {}
+    for i, gkey in enumerate(sorted(groups)):
+        gid = f"g{i}"
+        ids[gkey] = gid
+        label = _mermaid_label(groups[gkey]["label"])
+        lines.append(f'    {gid}["{label}"]')
+
+    for sk, tk in sorted(edges):
+        arrow = "-.->" if edges[(sk, tk)] else "-->"
+        lines.append(f"    {ids[sk]} {arrow} {ids[tk]}")
+
+    return "\n".join(lines)
 
 
 def generate_styled_mermaid(G: nx.DiGraph) -> str:
     """
     Generate a beautifully styled Mermaid flowchart with vibrant colors and icons.
-    
+
     Args:
         G: A directed graph where nodes are functions and edges are calls
-        
+
     Returns:
         A string containing the Mermaid diagram code
     """
-    mermaid_code = [
-        "flowchart LR",
-        "    %% Node definitions with styling"
-    ]
+    mermaid_code = ["flowchart LR", "    %% Node definitions with styling"]
 
     # Track node IDs to ensure uniqueness
     node_ids: Dict[str, str] = {}
@@ -48,7 +130,7 @@ def generate_styled_mermaid(G: nx.DiGraph) -> str:
     # Group nodes by module
     modules: Dict[str, List[str]] = {}
     for node in G.nodes():
-        module = G.nodes[node].get('module', 'unknown')
+        module = G.nodes[node].get("module", "unknown")
         if module not in modules:
             modules[module] = []
         modules[module].append(node)
@@ -61,7 +143,7 @@ def generate_styled_mermaid(G: nx.DiGraph) -> str:
 
     # Process each module
     for module_idx, (module, nodes) in enumerate(sorted_modules):
-        module_short_name = module.split('.')[-1]
+        module_short_name = module.split(".")[-1]
         module_id = f"mod{module_idx}"
 
         # Add module subgraph with icon
@@ -73,7 +155,7 @@ def generate_styled_mermaid(G: nx.DiGraph) -> str:
         standalone_nodes: List[str] = []
 
         for node in nodes:
-            class_name = G.nodes[node].get('class')
+            class_name = G.nodes[node].get("class")
             if class_name:
                 if class_name not in classes:
                     classes[class_name] = []
@@ -83,7 +165,7 @@ def generate_styled_mermaid(G: nx.DiGraph) -> str:
 
         # Process each class
         for class_idx, (class_name, class_nodes) in enumerate(sorted(classes.items())):
-            class_short_name = class_name.split('.')[-1]
+            class_short_name = class_name.split(".")[-1]
             class_id = f"cls{module_idx}_{class_idx}"
 
             # Add class subgraph with icon
@@ -95,15 +177,15 @@ def generate_styled_mermaid(G: nx.DiGraph) -> str:
 
             # Process methods in order of importance
             for node_list, icon, style_class in [
-                (categories['init'], "fa:fa-play-circle", "constructor"),
-                (categories['property'], "fa:fa-lock", "property"),
-                (categories['static'], "fa:fa-cog", "static"),
-                (categories['async'], "fa:fa-bolt", "async"),
-                (categories['regular'], "fa:fa-code-branch", "method"),
-                (categories['private'], "fa:fa-key", "private")
+                (categories["init"], "fa:fa-play-circle", "constructor"),
+                (categories["property"], "fa:fa-lock", "property"),
+                (categories["static"], "fa:fa-cog", "static"),
+                (categories["async"], "fa:fa-bolt", "async"),
+                (categories["regular"], "fa:fa-code-branch", "method"),
+                (categories["private"], "fa:fa-key", "private"),
             ]:
                 for node in node_list:
-                    method_name = node.split('.')[-1]
+                    method_name = node.split(".")[-1]
                     # Generate a unique ID for this node
                     if node not in node_ids:
                         node_ids[node] = f"node{node_count}"
@@ -111,7 +193,9 @@ def generate_styled_mermaid(G: nx.DiGraph) -> str:
                     node_id = node_ids[node]
 
                     # Add the node with its icon and style
-                    mermaid_code.append(f'                {node_id}["{icon} {method_name}"]:::{style_class}')
+                    mermaid_code.append(
+                        f'                {node_id}["{icon} {method_name}"]:::{style_class}'
+                    )
 
             mermaid_code.append("        end")
 
@@ -121,8 +205,12 @@ def generate_styled_mermaid(G: nx.DiGraph) -> str:
             mermaid_code.append(f'        subgraph {func_id}["fa:fa-sitemap Module Functions"]')
 
             for node in standalone_nodes:
-                func_name = node.split('.')[-1]
-                is_private = func_name.startswith('_') and not func_name.startswith('__') and not func_name.endswith('__')
+                func_name = node.split(".")[-1]
+                is_private = (
+                    func_name.startswith("_")
+                    and not func_name.startswith("__")
+                    and not func_name.endswith("__")
+                )
 
                 # Generate a unique ID for this node
                 if node not in node_ids:
@@ -131,31 +219,37 @@ def generate_styled_mermaid(G: nx.DiGraph) -> str:
                 node_id = node_ids[node]
 
                 # Determine icon and style based on function type
-                if G.nodes[node].get('is_async', False):
+                if G.nodes[node].get("is_async", False):
                     mermaid_code.append(f'            {node_id}["fa:fa-bolt {func_name}"]:::async')
                 elif is_private:
                     mermaid_code.append(f'            {node_id}["fa:fa-key {func_name}"]:::private')
-                elif G.nodes[node].get('decorators', []):
-                    mermaid_code.append(f'            {node_id}["fa:fa-star {func_name}"]:::decorated')
+                elif G.nodes[node].get("decorators", []):
+                    mermaid_code.append(
+                        f'            {node_id}["fa:fa-star {func_name}"]:::decorated'
+                    )
                 else:
-                    mermaid_code.append(f'            {node_id}["fa:fa-code-branch {func_name}"]:::method')
+                    mermaid_code.append(
+                        f'            {node_id}["fa:fa-code-branch {func_name}"]:::method'
+                    )
 
             mermaid_code.append("        end")
 
         mermaid_code.append("    end")
 
     # Add a legend section
-    mermaid_code.extend([
-        '    subgraph legend["Legend"]',
-        '        l1["fa:fa-play-circle Constructor"]:::constructor',
-        '        l2["fa:fa-code-branch Method"]:::method',
-        '        l3["fa:fa-bolt Async Method"]:::async',
-        '        l4["fa:fa-lock Property"]:::property',
-        '        l5["fa:fa-cog Static Method"]:::static',
-        '        l6["fa:fa-key Private Method"]:::private',
-        '        l7["fa:fa-star Decorated Method"]:::decorated',
-        "    end"
-    ])
+    mermaid_code.extend(
+        [
+            '    subgraph legend["Legend"]',
+            '        l1["fa:fa-play-circle Constructor"]:::constructor',
+            '        l2["fa:fa-code-branch Method"]:::method',
+            '        l3["fa:fa-bolt Async Method"]:::async',
+            '        l4["fa:fa-lock Property"]:::property',
+            '        l5["fa:fa-cog Static Method"]:::static',
+            '        l6["fa:fa-key Private Method"]:::private',
+            '        l7["fa:fa-star Decorated Method"]:::decorated',
+            "    end",
+        ]
+    )
 
     # Add connections between nodes
     mermaid_code.extend(["", "    %% Connections between methods"])
@@ -167,13 +261,13 @@ def generate_styled_mermaid(G: nx.DiGraph) -> str:
             target_id = node_ids[target]
 
             # Check if this edge is part of a cycle
-            if data.get('is_cycle'):
+            if data.get("is_cycle"):
                 mermaid_code.append(f"    {source_id} -.-> {target_id}")
             # Check if it's a callback relationship
-            elif any(kw in source.lower() for kw in ['callback', 'handler', 'listener']):
+            elif any(kw in source.lower() for kw in ["callback", "handler", "listener"]):
                 mermaid_code.append(f"    {source_id} ==> {target_id}")
             # Check if it's likely a dependency injection
-            elif target.lower().endswith(('factory', 'provider', 'service')):
+            elif target.lower().endswith(("factory", "provider", "service")):
                 mermaid_code.append(f"    {source_id} --o {target_id}")
             else:
                 # Regular call
@@ -185,15 +279,15 @@ def generate_styled_mermaid(G: nx.DiGraph) -> str:
         f"    style title color:#ffffff, fill:{COLORS['module']['primary']}, "
         f"stroke:{COLORS['module']['primary']}, stroke-width:0px, font-size:18px"
     )
-    
+
     for style_class, color_key in [
-        ('constructor', 'constructor'),
-        ('method', 'method'),
-        ('async', 'async'),
-        ('property', 'property'),
-        ('static', 'static'),
-        ('private', 'private'),
-        ('decorated', 'class'),
+        ("constructor", "constructor"),
+        ("method", "method"),
+        ("async", "async"),
+        ("property", "property"),
+        ("static", "static"),
+        ("private", "private"),
+        ("decorated", "class"),
     ]:
         mermaid_code.append(
             f"    classDef {style_class} color:#ffffff, "
@@ -201,36 +295,40 @@ def generate_styled_mermaid(G: nx.DiGraph) -> str:
             f"stroke:{COLORS[color_key]['secondary']}"
         )
 
-    return '\n'.join(mermaid_code)
+    return "\n".join(mermaid_code)
 
 
 def _categorize_methods(G: nx.DiGraph, class_nodes: List[str]) -> Dict[str, List[str]]:
     """Categorize methods by their type."""
     categories: Dict[str, List[str]] = {
-        'init': [],
-        'property': [],
-        'static': [],
-        'async': [],
-        'private': [],
-        'regular': []
+        "init": [],
+        "property": [],
+        "static": [],
+        "async": [],
+        "private": [],
+        "regular": [],
     }
 
     for node in class_nodes:
-        method_name = node.split('.')[-1]
-        is_private = method_name.startswith('_') and not method_name.startswith('__') and not method_name.endswith('__')
+        method_name = node.split(".")[-1]
+        is_private = (
+            method_name.startswith("_")
+            and not method_name.startswith("__")
+            and not method_name.endswith("__")
+        )
 
-        if method_name in ('__init__', '__new__'):
-            categories['init'].append(node)
-        elif G.nodes[node].get('is_property', False):
-            categories['property'].append(node)
-        elif any(d.get('name') == 'staticmethod' for d in G.nodes[node].get('decorators', [])):
-            categories['static'].append(node)
-        elif G.nodes[node].get('is_async', False):
-            categories['async'].append(node)
+        if method_name in ("__init__", "__new__"):
+            categories["init"].append(node)
+        elif G.nodes[node].get("is_property", False):
+            categories["property"].append(node)
+        elif any(d.get("name") == "staticmethod" for d in G.nodes[node].get("decorators", [])):
+            categories["static"].append(node)
+        elif G.nodes[node].get("is_async", False):
+            categories["async"].append(node)
         elif is_private:
-            categories['private'].append(node)
+            categories["private"].append(node)
         else:
-            categories['regular'].append(node)
+            categories["regular"].append(node)
 
     return categories
 
@@ -238,15 +336,15 @@ def _categorize_methods(G: nx.DiGraph, class_nodes: List[str]) -> Dict[str, List
 def create_interactive_html(mermaid_code: str, project_name: str) -> str:
     """
     Create a beautiful interactive HTML page for the Mermaid diagram.
-    
+
     Args:
         mermaid_code: The Mermaid diagram code
         project_name: Name of the project for the title
-        
+
     Returns:
         HTML string for the interactive viewer
     """
-    return f'''<!DOCTYPE html>
+    return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -528,32 +626,32 @@ def create_interactive_html(mermaid_code: str, project_name: str) -> str:
         }}
     </script>
 </body>
-</html>'''
+</html>"""
 
 
 def export_diagram(
     mermaid_code: str,
     output_path: str,
-    output_format: str = 'mermaid',
-    project_name: str = "Project"
+    output_format: str = "mermaid",
+    project_name: str = "Project",
 ) -> None:
     """
     Export the Mermaid diagram to the specified format.
-    
+
     Args:
         mermaid_code: The Mermaid diagram code
         output_path: Path to save the output
         output_format: 'mermaid', 'svg', or 'png'
         project_name: Name of the project for titles
     """
-    if output_format == 'mermaid':
-        with open(output_path, 'w', encoding='utf-8') as f:
+    if output_format == "mermaid":
+        with open(output_path, "w", encoding="utf-8") as f:
             f.write(mermaid_code)
         logger.info(f"Mermaid diagram saved to {output_path}")
 
         # Create an enhanced HTML version
         html_path = f"{os.path.splitext(output_path)[0]}.html"
-        with open(html_path, 'w', encoding='utf-8') as f:
+        with open(html_path, "w", encoding="utf-8") as f:
             f.write(create_interactive_html(mermaid_code, project_name))
         logger.info(f"Interactive HTML diagram saved to {html_path}")
     else:
@@ -562,35 +660,40 @@ def export_diagram(
 
             # Save the mermaid code to a temporary file
             temp_file = f"{output_path}.tmp.mmd"
-            with open(temp_file, 'w', encoding='utf-8') as f:
+            with open(temp_file, "w", encoding="utf-8") as f:
                 f.write(mermaid_code)
 
             # Run mmdc with enhanced configuration
             result = subprocess.run(
                 [
-                    'mmdc',
-                    '-i', temp_file,
-                    '-o', output_path,
-                    '-b', 'transparent',
-                    '-w', '2000',
-                    '-H', '1500',
+                    "mmdc",
+                    "-i",
+                    temp_file,
+                    "-o",
+                    output_path,
+                    "-b",
+                    "transparent",
+                    "-w",
+                    "2000",
+                    "-H",
+                    "1500",
                 ],
                 capture_output=True,
                 text=True,
-                check=False
+                check=False,
             )
 
             if result.returncode != 0:
                 logger.error(f"Error generating {output_format}: {result.stderr}")
                 logger.info("Falling back to mermaid format")
-                with open(f"{output_path}.mmd", 'w', encoding='utf-8') as f:
+                with open(f"{output_path}.mmd", "w", encoding="utf-8") as f:
                     f.write(mermaid_code)
             else:
                 logger.info(f"{output_format.upper()} diagram saved to {output_path}")
 
             # Always create an HTML version
             html_path = f"{os.path.splitext(output_path)[0]}.html"
-            with open(html_path, 'w', encoding='utf-8') as f:
+            with open(html_path, "w", encoding="utf-8") as f:
                 f.write(create_interactive_html(mermaid_code, project_name))
 
             # Clean up the temporary file
@@ -602,9 +705,9 @@ def export_diagram(
         except (ImportError, FileNotFoundError):
             logger.error(f"Could not generate {output_format}. Make sure mermaid-cli is installed.")
             logger.info("Saving as mermaid format instead")
-            with open(f"{output_path}.mmd", 'w', encoding='utf-8') as f:
+            with open(f"{output_path}.mmd", "w", encoding="utf-8") as f:
                 f.write(mermaid_code)
 
             html_path = f"{os.path.splitext(output_path)[0]}.html"
-            with open(html_path, 'w', encoding='utf-8') as f:
+            with open(html_path, "w", encoding="utf-8") as f:
                 f.write(create_interactive_html(mermaid_code, project_name))

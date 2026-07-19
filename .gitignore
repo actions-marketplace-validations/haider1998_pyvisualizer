@@ -137,13 +137,19 @@ dmypy.json
 # VS Code
 .vscode/
 
-# Output files
+# Output files (generated diagrams)
 *.mmd
 *.html
 *.svg
 *.png
 output/
 diagrams/
+
+# ...but the docs/ site and its assets are intentional, not generated output
+!docs/**
+!docs/*.html
+!docs/**/*.svg
+!docs/**/*.png
 
 # OS generated files
 .DS_Store

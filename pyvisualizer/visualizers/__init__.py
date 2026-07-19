@@ -1,19 +1,19 @@
 """Visualization modules for PyVisualizer."""
 
+from pyvisualizer.visualizers.d3 import generate_d3_visualization
+from pyvisualizer.visualizers.html import generate_html_visualization
 from pyvisualizer.visualizers.mermaid import (
-    generate_styled_mermaid,
     create_interactive_html,
     export_diagram,
-)
-from pyvisualizer.visualizers.d3 import (
-    create_d3_html_template,
-    generate_d3_visualization,
+    generate_github_mermaid,
+    generate_styled_mermaid,
 )
 
 __all__ = [
     "generate_styled_mermaid",
+    "generate_github_mermaid",
     "create_interactive_html",
     "export_diagram",
-    "create_d3_html_template",
     "generate_d3_visualization",
+    "generate_html_visualization",
 ]

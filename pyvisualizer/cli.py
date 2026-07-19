@@ -1,286 +1,533 @@
 """
-PyVisualizer CLI - Command-line interface for Python code visualization.
+PyVisualizer CLI — deterministic architecture ground truth for Python.
 
-Usage:
-    py-code-visualizer /path/to/project [options]
+Subcommands
+    visualize   Render a diagram (html | mermaid | json | svg | png)
+    readme      Inject/update a Mermaid diagram inside a Markdown file
+    json        Emit the canonical graph JSON
+    diff        Compare two graph JSON snapshots (PR-ready report)
+    check       Enforce architecture rules (layers, cycles) — CI gate
+    impact      Blast-radius analysis for a function
+
+Back-compat: ``py-code-visualizer <path> [options]`` still works and maps to
+the ``visualize`` subcommand.
 """
 
 import argparse
 import logging
 import os
 import sys
-from typing import Optional
+from typing import TYPE_CHECKING, List, Optional
 
-# Configure logging
+from pyvisualizer import __version__
+
+if TYPE_CHECKING:
+    import networkx as nx
+
+    from pyvisualizer.api import GraphResult
+    from pyvisualizer.diff import DiffResult
+
 logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger("pyvisualizer")
 
+_SUBCOMMANDS = {"visualize", "readme", "json", "diff", "check", "impact", "export", "health"}
+
+
+# --------------------------------------------------------------------------- #
+# Argument parsing
+# --------------------------------------------------------------------------- #
+def _inject_default_subcommand(argv: List[str]) -> List[str]:
+    """Preserve the legacy ``<path> [options]`` form by defaulting to visualize."""
+    if not argv:
+        return ["visualize"]
+    first = argv[0]
+    if first in _SUBCOMMANDS:
+        return argv
+    if first in ("-h", "--help", "--version"):
+        return argv
+    return ["visualize"] + argv
+
+
+def _build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="py-code-visualizer",
+        description="Deterministic architecture ground truth for Python projects.",
+    )
+    parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
+    sub = parser.add_subparsers(dest="command")
+
+    def _common(p: argparse.ArgumentParser) -> None:
+        p.add_argument("--modules", "-m", nargs="+", help="Include only these modules")
+        p.add_argument("--exclude", "-x", nargs="+", help="Exclude module patterns")
+        p.add_argument("--depth", "-d", type=int, help="Max call depth from entry")
+        p.add_argument("--entry", "-e", help="Entry point (module.function)")
+        p.add_argument("--max-nodes", type=int, default=150, help="Max nodes")
+        p.add_argument(
+            "--strict", action="store_true", help="Drop ambiguous edges (no guesses at all)"
+        )
+        p.add_argument("--project-name", "-p", help="Project name for titles")
+        p.add_argument("--verbose", "-v", action="store_true")
+
+    # visualize -----------------------------------------------------------
+    pv = sub.add_parser("visualize", help="Render a diagram")
+    pv.add_argument("path", help="Path to Python project or file")
+    pv.add_argument("--output", "-o", help="Output file path")
+    pv.add_argument(
+        "--format", "-f", choices=["html", "mermaid", "json", "c4", "svg", "png"], default="html"
+    )
+    pv.add_argument(
+        "--churn",
+        action="store_true",
+        help="Overlay git change-frequency (heatmap) in the HTML viewer",
+    )
+    _common(pv)
+    pv.set_defaults(func=cmd_visualize)
+
+    # readme --------------------------------------------------------------
+    pr = sub.add_parser("readme", help="Self-heal a Mermaid diagram in a Markdown file")
+    pr.add_argument("path", nargs="?", default=".", help="Project path")
+    pr.add_argument("--target", "-t", help="Markdown file to update (default: README.md)")
+    pr.add_argument("--detail", choices=["module", "class", "function"], help="Diagram granularity")
+    pr.add_argument(
+        "--check",
+        action="store_true",
+        help="Exit non-zero if the file would change (CI drift gate)",
+    )
+    _common(pr)
+    pr.set_defaults(func=cmd_readme)
+
+    # json ----------------------------------------------------------------
+    pj = sub.add_parser("json", help="Emit canonical graph JSON")
+    pj.add_argument("path", help="Project path")
+    pj.add_argument("--output", "-o", help="Output file (default: stdout)")
+    _common(pj)
+    pj.set_defaults(func=cmd_json)
+
+    # diff ----------------------------------------------------------------
+    pd = sub.add_parser("diff", help="Diff two graph JSON snapshots")
+    pd.add_argument("base", help="Base graph JSON")
+    pd.add_argument("head", help="Head graph JSON")
+    pd.add_argument("--format", choices=["markdown", "text"], default="markdown")
+    pd.add_argument("--output", "-o", help="Output file (default: stdout)")
+    pd.add_argument("--project-name", "-p", default="")
+    pd.add_argument(
+        "--fail-on-new-cycles",
+        action="store_true",
+        help="Exit non-zero if new circular dependencies appear",
+    )
+    pd.add_argument("--no-diagram", action="store_true")
+    pd.add_argument("--verbose", "-v", action="store_true")
+    pd.set_defaults(func=cmd_diff)
+
+    # check ---------------------------------------------------------------
+    pc = sub.add_parser("check", help="Enforce architecture rules (CI gate)")
+    pc.add_argument("path", nargs="?", default=".", help="Project path")
+    pc.add_argument("--fail-on-cycles", action="store_true", help="Fail on any circular dependency")
+    pc.add_argument("--forbid", nargs="+", help="Ad-hoc layer rules, e.g. 'domain -> api'")
+    pc.add_argument("--layers", nargs="+", help="Layer names")
+    _common(pc)
+    pc.set_defaults(func=cmd_check)
+
+    # impact --------------------------------------------------------------
+    pi = sub.add_parser("impact", help="Blast-radius analysis for a function")
+    pi.add_argument("target", help="Function (short or qualified name)")
+    pi.add_argument("path", nargs="?", default=".", help="Project path")
+    _common(pi)
+    pi.set_defaults(func=cmd_impact)
+
+    # check gains a dead-code flag.
+    pc.add_argument(
+        "--dead-code", action="store_true", help="Report functions with no in-project callers"
+    )
+
+    # health --------------------------------------------------------------
+    ph = sub.add_parser("health", help="Architecture health score (A–F)")
+    ph.add_argument("path", nargs="?", default=".", help="Project path")
+    ph.add_argument("--badge", help="Write a self-contained SVG badge to this path")
+    ph.add_argument("--min-grade", help="Fail if grade is below this (e.g. B-)")
+    _common(ph)
+    ph.set_defaults(func=cmd_health)
+
+    # export --------------------------------------------------------------
+    pe = sub.add_parser("export", help="Export ground truth for AI tools")
+    pe.add_argument("path", nargs="?", default=".", help="Project path")
+    pe.add_argument(
+        "--for-ai",
+        action="store_true",
+        default=True,
+        help="Emit ARCHITECTURE.json + ARCHITECTURE.md",
+    )
+    pe.add_argument("--out-dir", "-o", default=".", help="Output directory")
+    _common(pe)
+    pe.set_defaults(func=cmd_export)
+
+    return parser
+
+
+def _configure_logging(args: argparse.Namespace) -> None:
+    if getattr(args, "verbose", False):
+        logging.getLogger("pyvisualizer").setLevel(logging.DEBUG)
+
 
 def main(args: Optional[list] = None) -> int:
-    """
-    Main entry point for the PyVisualizer CLI.
-    
-    Args:
-        args: Command-line arguments (defaults to sys.argv)
-        
-    Returns:
-        Exit code (0 for success, non-zero for failure)
-    """
-    parser = argparse.ArgumentParser(
-        description='Generate code architecture diagrams for Python projects',
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
-        prog='py-code-visualizer'
-    )
-    
-    parser.add_argument(
-        'path',
-        help='Path to Python project or file'
-    )
-    parser.add_argument(
-        '--output', '-o',
-        help='Output file path (default: <project>_visualization.<format>)'
-    )
-    parser.add_argument(
-        '--format', '-f',
-        choices=['html', 'mermaid', 'svg', 'png'],
-        default='html',
-        help='Output format: html (interactive D3.js), mermaid (diagram), svg/png (static image)'
-    )
-    parser.add_argument(
-        '--modules', '-m',
-        nargs='+',
-        help='Filter by module names (include only these modules)'
-    )
-    parser.add_argument(
-        '--exclude', '-x',
-        nargs='+',
-        help='Exclude modules matching these patterns'
-    )
-    parser.add_argument(
-        '--depth', '-d',
-        type=int,
-        help='Maximum call depth from entry point'
-    )
-    parser.add_argument(
-        '--entry', '-e',
-        help='Entry point function (format: module.function)'
-    )
-    parser.add_argument(
-        '--max-nodes',
-        type=int,
-        default=150,
-        help='Maximum number of nodes to include in the diagram'
-    )
-    parser.add_argument(
-        '--project-name', '-p',
-        help='Project name to use in diagram title'
-    )
-    parser.add_argument(
-        '--verbose', '-v',
-        action='store_true',
-        help='Enable verbose logging'
-    )
-    parser.add_argument(
-        '--version',
-        action='version',
-        version='%(prog)s 1.0.0'
-    )
-    
-    parsed_args = parser.parse_args(args)
-    
-    # Set log level
-    if parsed_args.verbose:
-        logger.setLevel(logging.DEBUG)
-        logging.getLogger("pyvisualizer").setLevel(logging.DEBUG)
-    
-    # Import here to avoid circular imports and improve startup time
+    argv = list(sys.argv[1:] if args is None else args)
+    argv = _inject_default_subcommand(argv)
+    parser = _build_parser()
+    parsed = parser.parse_args(argv)
+    _configure_logging(parsed)
+    if not hasattr(parsed, "func"):
+        parser.print_help()
+        return 1
     try:
-        import networkx as nx
-    except ImportError:
-        logger.error("networkx is required. Install it with: pip install networkx")
+        return int(parsed.func(parsed))
+    except (FileNotFoundError, ValueError) as e:
+        logger.error(str(e))
         return 1
-    
-    from pyvisualizer.utils.file_discovery import find_project_python_files, analyze_project
-    from pyvisualizer.core.graph import build_call_graph
-    from pyvisualizer.core.resolver import filter_by_modules, filter_by_depth
-    from pyvisualizer.visualizers.mermaid import generate_styled_mermaid, create_interactive_html
+
+
+# --------------------------------------------------------------------------- #
+# Subcommand handlers
+# --------------------------------------------------------------------------- #
+def _build(args: argparse.Namespace) -> "GraphResult":
+    from pyvisualizer.api import build_graph
+
+    return build_graph(
+        args.path,
+        modules=getattr(args, "modules", None),
+        exclude=getattr(args, "exclude", None),
+        entry=getattr(args, "entry", None),
+        depth=getattr(args, "depth", None),
+        max_nodes=getattr(args, "max_nodes", None),
+        strict=getattr(args, "strict", False),
+        project_name=getattr(args, "project_name", None),
+    )
+
+
+def cmd_visualize(args: argparse.Namespace) -> int:
+    from pyvisualizer.serializers.json_graph import graph_to_json
     from pyvisualizer.visualizers.d3 import generate_d3_visualization
-    
-    # Normalize project path to absolute path
-    project_path = os.path.abspath(parsed_args.path)
-    
-    if not os.path.exists(project_path):
-        logger.error(f"Path does not exist: {project_path}")
-        return 1
-    
-    # Get project name from path or argument
-    project_name = parsed_args.project_name or os.path.basename(project_path)
-    
-    # Find Python files
-    py_files = find_project_python_files(project_path)
-    if not py_files:
-        logger.error(f"No Python files found in {parsed_args.path}")
-        return 1
-    
-    # Get project root
-    project_root = project_path if os.path.isdir(project_path) else os.path.dirname(project_path)
-    
-    # Analyze the project
-    logger.info("Analyzing project structure and dependencies...")
-    module_analyzers, all_calls = analyze_project(py_files, project_root)
-    
-    # Build the call graph
-    logger.info("Building function call graph...")
-    G = build_call_graph(module_analyzers, all_calls)
-    logger.info(f"Built graph with {len(G.nodes())} functions and {len(G.edges())} calls")
-    
-    # Apply filters
-    if parsed_args.modules:
-        logger.info(f"Filtering to include only modules: {', '.join(parsed_args.modules)}")
-        G = filter_by_modules(G, parsed_args.modules)
-        logger.info(f"After module filtering: {len(G.nodes())} functions and {len(G.edges())} calls")
-    
-    if parsed_args.exclude:
-        logger.info(f"Excluding modules: {', '.join(parsed_args.exclude)}")
-        nodes_to_remove = []
-        for node in G.nodes():
-            module = G.nodes[node].get('module', '')
-            if any(module.startswith(excluded) for excluded in parsed_args.exclude):
-                nodes_to_remove.append(node)
-        G.remove_nodes_from(nodes_to_remove)
-        logger.info(f"After exclusion: {len(G.nodes())} functions and {len(G.edges())} calls")
-    
-    if parsed_args.entry and parsed_args.depth:
-        logger.info(f"Filtering to depth {parsed_args.depth} from entry point {parsed_args.entry}")
-        G = filter_by_depth(G, parsed_args.entry, parsed_args.depth)
-        logger.info(f"After depth filtering: {len(G.nodes())} functions and {len(G.edges())} calls")
-    
-    # Limit nodes if needed
-    if len(G.nodes()) > parsed_args.max_nodes:
-        logger.warning(f"Graph has {len(G.nodes())} nodes, exceeding limit of {parsed_args.max_nodes}")
-        logger.warning("Removing least connected nodes to reduce graph size")
-        
-        # Sort nodes by degree (number of connections)
-        node_degrees = sorted(G.degree(), key=lambda x: x[1])
-        nodes_to_remove = [node for node, degree in node_degrees[:len(G.nodes()) - parsed_args.max_nodes]]
-        G.remove_nodes_from(nodes_to_remove)
-        logger.info(f"After limiting nodes: {len(G.nodes())} functions and {len(G.edges())} calls")
-    
-    # Check if we have anything to visualize
-    if len(G.nodes()) == 0:
+    from pyvisualizer.visualizers.mermaid import (
+        create_interactive_html,
+        generate_styled_mermaid,
+    )
+
+    result = _build(args)
+    G = result.graph
+    if G.number_of_nodes() == 0:
         logger.warning("No functions to visualize after applying filters")
         return 0
-    
-    # Set default output path
-    if not parsed_args.output:
-        parsed_args.output = f"{project_name}_visualization.{parsed_args.format}"
-    
-    # Ensure output directory exists
-    output_dir = os.path.dirname(os.path.abspath(parsed_args.output))
-    if output_dir:
-        os.makedirs(output_dir, exist_ok=True)
-    
-    # Generate visualization
-    if parsed_args.format == 'html':
-        logger.info("Generating interactive D3.js visualization...")
-        generate_d3_visualization(G, parsed_args.output, project_name)
-        
-    elif parsed_args.format == 'mermaid':
-        logger.info("Generating Mermaid diagram...")
-        mermaid_code = generate_styled_mermaid(G)
-        
-        with open(parsed_args.output, 'w', encoding='utf-8') as f:
-            f.write(mermaid_code)
-        
-        # Also generate HTML version
-        html_path = f"{os.path.splitext(parsed_args.output)[0]}.html"
-        with open(html_path, 'w', encoding='utf-8') as f:
-            f.write(create_interactive_html(mermaid_code, project_name))
-        
-        logger.info(f"Mermaid diagram saved to {parsed_args.output}")
-        logger.info(f"Interactive HTML version saved to {html_path}")
-        
-    elif parsed_args.format in ['svg', 'png']:
-        try:
-            import graphviz
-            logger.info(f"Generating {parsed_args.format.upper()} using Graphviz...")
-            
-            dot = graphviz.Digraph(
-                comment=f'{project_name} Code Structure',
-                engine='dot',
-                format=parsed_args.format,
-                graph_attr={
-                    'rankdir': 'LR',
-                    'bgcolor': 'transparent',
-                    'fontname': 'Arial',
-                    'nodesep': '0.8',
-                    'ranksep': '1.0'
-                }
-            )
-            
-            # Color mapping
-            colors = {
-                '__init__': '#E53935',
-                '__new__': '#E53935',
-                'property': '#FF6D00',
-                'async': '#AA00FF',
-                'private': '#757575',
-                'method': '#2962FF',
-                'function': '#00C853',
-            }
-            
-            for node in G.nodes():
-                node_name = node.split('.')[-1]
-                node_data = G.nodes[node]
-                
-                # Determine color
-                if node_name in ('__init__', '__new__'):
-                    fillcolor = colors['__init__']
-                elif node_data.get('is_property', False):
-                    fillcolor = colors['property']
-                elif node_data.get('is_async', False):
-                    fillcolor = colors['async']
-                elif node_name.startswith('_') and not node_name.startswith('__'):
-                    fillcolor = colors['private']
-                elif node_data.get('class'):
-                    fillcolor = colors['method']
-                else:
-                    fillcolor = colors['function']
-                
-                dot.node(
-                    node,
-                    label=node_name,
-                    shape='box' if node_data.get('class') else 'ellipse',
-                    style='filled',
-                    fillcolor=fillcolor,
-                    fontcolor='white',
-                    fontname='Arial',
-                    fontsize='12'
+
+    fmt = args.format
+    output = args.output or f"{result.project_name}_visualization.{fmt}"
+    out_dir = os.path.dirname(os.path.abspath(output))
+    if out_dir:
+        os.makedirs(out_dir, exist_ok=True)
+
+    if getattr(args, "churn", False):
+        from pyvisualizer.overlays import apply_churn
+
+        if apply_churn(G, result.project_root):
+            logger.info("Applied git churn overlay.")
+        else:
+            logger.warning("No churn data (not a git repo?); overlay skipped.")
+
+    if fmt == "html":
+        generate_d3_visualization(
+            G,
+            output,
+            result.project_name,
+            project_root=result.project_root,
+            tool_version=__version__,
+        )
+    elif fmt == "c4":
+        from pyvisualizer.serializers.c4 import generate_c4_dsl
+
+        with open(output, "w", encoding="utf-8") as f:
+            f.write(generate_c4_dsl(G, result.project_name))
+        logger.info("Structurizr C4 DSL saved to %s", output)
+    elif fmt == "json":
+        with open(output, "w", encoding="utf-8") as f:
+            f.write(
+                graph_to_json(
+                    G,
+                    project_name=result.project_name,
+                    project_root=result.project_root,
+                    tool_version=__version__,
                 )
-            
-            for source, target, data in G.edges(data=True):
-                is_cycle = data.get('is_cycle', False)
-                if is_cycle:
-                    dot.edge(source, target, color='#F44336', style='dashed', penwidth='1.5')
-                else:
-                    dot.edge(source, target, color='#616161', penwidth='1.0')
-            
-            dot.render(parsed_args.output, cleanup=True)
-            logger.info(f"{parsed_args.format.upper()} saved to {parsed_args.output}.{parsed_args.format}")
-            
-        except ImportError:
-            logger.error("graphviz is required for SVG/PNG output. Install it with: pip install graphviz")
-            logger.warning("Falling back to D3.js HTML visualization")
-            generate_d3_visualization(G, f"{os.path.splitext(parsed_args.output)[0]}.html", project_name)
-        except Exception as e:
-            logger.error(f"Failed to generate {parsed_args.format}: {e}")
-            logger.warning("Falling back to D3.js HTML visualization")
-            generate_d3_visualization(G, f"{os.path.splitext(parsed_args.output)[0]}.html", project_name)
-    
+            )
+        logger.info("JSON graph saved to %s", output)
+    elif fmt == "mermaid":
+        code = generate_styled_mermaid(G)
+        with open(output, "w", encoding="utf-8") as f:
+            f.write(code)
+        html_path = f"{os.path.splitext(output)[0]}.html"
+        with open(html_path, "w", encoding="utf-8") as f:
+            f.write(create_interactive_html(code, result.project_name))
+        logger.info("Mermaid saved to %s (HTML: %s)", output, html_path)
+    elif fmt in ("svg", "png"):
+        _render_graphviz(G, output, result.project_name, fmt)
     return 0
+
+
+def _render_graphviz(G: "nx.DiGraph", output: str, project_name: str, fmt: str) -> None:
+    try:
+        import graphviz
+    except ImportError:
+        logger.error("graphviz is required for %s output (pip install graphviz).", fmt)
+        from pyvisualizer.visualizers.d3 import generate_d3_visualization
+
+        generate_d3_visualization(G, f"{os.path.splitext(output)[0]}.html", project_name)
+        return
+
+    colors = {
+        "constructor": "#E53935",
+        "property": "#FF6D00",
+        "async": "#AA00FF",
+        "private": "#757575",
+        "method": "#2962FF",
+        "function": "#00C853",
+    }
+    dot = graphviz.Digraph(
+        comment=f"{project_name} Code Structure",
+        engine="dot",
+        format=fmt,
+        graph_attr={"rankdir": "LR", "bgcolor": "transparent", "fontname": "Arial"},
+    )
+    for node in sorted(G.nodes()):
+        nd = G.nodes[node]
+        name = node.split(".")[-1]
+        if name in ("__init__", "__new__"):
+            fill = colors["constructor"]
+        elif nd.get("is_property"):
+            fill = colors["property"]
+        elif nd.get("is_async"):
+            fill = colors["async"]
+        elif name.startswith("_") and not name.startswith("__"):
+            fill = colors["private"]
+        elif nd.get("class"):
+            fill = colors["method"]
+        else:
+            fill = colors["function"]
+        dot.node(
+            node,
+            label=name,
+            shape="box" if nd.get("class") else "ellipse",
+            style="filled",
+            fillcolor=fill,
+            fontcolor="white",
+            fontname="Arial",
+        )
+    for s, t, d in sorted(G.edges(data=True)):
+        if d.get("is_cycle"):
+            dot.edge(s, t, color="#F44336", style="dashed")
+        else:
+            dot.edge(s, t, color="#616161")
+    dot.render(output, cleanup=True)
+    logger.info("%s saved to %s.%s", fmt.upper(), output, fmt)
+
+
+def cmd_readme(args: argparse.Namespace) -> int:
+    from pyvisualizer.config import load_config
+    from pyvisualizer.inject import inject, update_file
+    from pyvisualizer.visualizers.mermaid import generate_github_mermaid
+
+    cfg = load_config(args.path)
+    # CLI flags override config; config overrides built-in defaults.
+    if args.exclude is None and cfg.exclude:
+        args.exclude = cfg.exclude
+    if args.modules is None and cfg.modules:
+        args.modules = cfg.modules
+    if getattr(args, "max_nodes", None) in (None, 150) and cfg.max_nodes:
+        args.max_nodes = cfg.max_nodes
+    if not getattr(args, "strict", False):
+        args.strict = cfg.strict
+    detail = args.detail or cfg.detail
+    target = args.target or cfg.target
+
+    from pyvisualizer.metrics import compute_health
+
+    result = _build(args)
+    G = result.graph
+    mermaid_code = generate_github_mermaid(G, detail=detail)
+    health = compute_health(G)
+
+    heading = (
+        f"*{G.number_of_nodes()} functions · {G.number_of_edges()} calls · "
+        f"health {health.grade} ({health.score}/100) — detail: {detail}*"
+    )
+    footer = (
+        "<sub>🔒 Deterministic, AST-verified — no code executed. "
+        "Generated by [py-code-visualizer]"
+        "(https://github.com/haider1998/PyVisualizer).</sub>"
+    )
+
+    target_path = (
+        target
+        if os.path.isabs(target)
+        else os.path.join(
+            (
+                os.path.abspath(args.path)
+                if os.path.isdir(args.path)
+                else os.path.dirname(os.path.abspath(args.path))
+            ),
+            target,
+        )
+    )
+
+    if getattr(args, "check", False):
+        existing = ""
+        if os.path.exists(target_path):
+            with open(target_path, "r", encoding="utf-8") as f:
+                existing = f.read()
+        _, changed = inject(existing, mermaid_code, heading=heading, footer=footer)
+        if changed:
+            logger.error("%s is out of date. Run `py-code-visualizer readme`.", target)
+            return 1
+        logger.info("%s architecture diagram is up to date.", target)
+        return 0
+
+    changed = update_file(target_path, mermaid_code, heading=heading, footer=footer)
+    if changed:
+        logger.info("Updated architecture diagram in %s", target_path)
+    else:
+        logger.info("%s already up to date (no change).", target_path)
+    return 0
+
+
+def cmd_json(args: argparse.Namespace) -> int:
+    from pyvisualizer.serializers.json_graph import graph_to_json
+
+    result = _build(args)
+    payload = graph_to_json(
+        result.graph,
+        project_name=result.project_name,
+        project_root=result.project_root,
+        tool_version=__version__,
+    )
+    if args.output:
+        with open(args.output, "w", encoding="utf-8") as f:
+            f.write(payload)
+        logger.info("JSON graph saved to %s", args.output)
+    else:
+        print(payload)
+    return 0
+
+
+def cmd_diff(args: argparse.Namespace) -> int:
+    from pyvisualizer.diff import DiffResult, diff_graphs, render_markdown
+    from pyvisualizer.serializers.json_graph import load_graph_json
+
+    base = load_graph_json(args.base)
+    head = load_graph_json(args.head)
+    result: DiffResult = diff_graphs(base, head)
+
+    if args.format == "markdown":
+        out = render_markdown(result, args.project_name, include_diagram=not args.no_diagram)
+    else:
+        out = _diff_text(result)
+
+    if args.output:
+        with open(args.output, "w", encoding="utf-8") as f:
+            f.write(out)
+    else:
+        print(out)
+
+    if args.fail_on_new_cycles and result.new_cycles:
+        logger.error("%d new circular dependency(ies) introduced.", len(result.new_cycles))
+        return 2
+    return 0
+
+
+def _diff_text(result: "DiffResult") -> str:
+    lines = [
+        f"Added functions:   {len(result.added_functions)}",
+        f"Removed functions: {len(result.removed_functions)}",
+        f"Added calls:       {len(result.added_edges)}",
+        f"Removed calls:     {len(result.removed_edges)}",
+        f"New cycles:        {len(result.new_cycles)}",
+    ]
+    for c in result.new_cycles:
+        lines.append("  cycle: " + " -> ".join(n.split(".")[-1] for n in c))
+    return "\n".join(lines)
+
+
+def cmd_check(args: argparse.Namespace) -> int:
+    from pyvisualizer.config import Rules, load_config
+    from pyvisualizer.gates import check_layer_rules, cycle_violations, render_report
+
+    cfg = load_config(args.path)
+    rules: Rules = cfg.rules
+    if args.forbid:
+        rules = Rules(
+            layers=args.layers or rules.layers,
+            forbid=args.forbid,
+            allow_ambiguous=rules.allow_ambiguous,
+        )
+
+    result = _build(args)
+    G = result.graph
+
+    layer_v = check_layer_rules(G, rules)
+    cycle_v = cycle_violations(G) if args.fail_on_cycles else []
+
+    print(render_report(layer_v, cycle_v))
+
+    if getattr(args, "dead_code", False):
+        from pyvisualizer.metrics import find_dead_code
+
+        dead = find_dead_code(G)
+        if dead:
+            print(
+                f"\n🟡 {len(dead)} function(s) with no in-project callers "
+                "(review — may be public API):"
+            )
+            for d in dead:
+                print(f"    {d}")
+    return 1 if (layer_v or cycle_v) else 0
+
+
+def cmd_health(args: argparse.Namespace) -> int:
+    from pyvisualizer.metrics import badge_svg, compute_health, render_health
+
+    result = _build(args)
+    report = compute_health(result.graph)
+    print(render_health(report, result.project_name))
+
+    if args.badge:
+        with open(args.badge, "w", encoding="utf-8") as f:
+            f.write(badge_svg(report))
+        logger.info("Health badge written to %s", args.badge)
+
+    if args.min_grade:
+        # Grades sort lexicographically the wrong way; compare scores instead.
+        order = ["F", "D-", "D", "D+", "C-", "C", "C+", "B-", "B", "B+", "A-", "A", "A+"]
+        try:
+            if order.index(report.grade) < order.index(args.min_grade):
+                logger.error("Health grade %s is below required %s.", report.grade, args.min_grade)
+                return 1
+        except ValueError:
+            logger.warning("Unknown --min-grade %s", args.min_grade)
+    return 0
+
+
+def cmd_export(args: argparse.Namespace) -> int:
+    from pyvisualizer.export import export_for_ai
+
+    result = _build(args)
+    paths = export_for_ai(result, out_dir=args.out_dir, tool_version=__version__)
+    logger.info("Wrote %s and %s", paths["json"], paths["markdown"])
+    return 0
+
+
+def cmd_impact(args: argparse.Namespace) -> int:
+    from pyvisualizer.impact import analyze_impact, render_text
+
+    result = _build(args)
+    impact = analyze_impact(result.graph, args.target)
+    print(render_text(impact))
+    return 0 if impact.found else 1
 
 
 if __name__ == "__main__":

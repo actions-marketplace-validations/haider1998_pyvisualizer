@@ -6,12 +6,11 @@ and converting file paths to module names.
 """
 
 import ast
-import os
-import logging
 import concurrent.futures
+import logging
+import os
 from functools import lru_cache
-from pathlib import Path
-from typing import Dict, List, Optional, Tuple, Set
+from typing import Dict, List, Optional, Set, Tuple
 
 from pyvisualizer.core.analyzer import ModuleAnalyzer
 from pyvisualizer.core.graph import FunctionCallVisitor
@@ -23,7 +22,7 @@ logger = logging.getLogger("pyvisualizer.discovery")
 def parse_python_file(file_path: str) -> Optional[ast.AST]:
     """Parse a Python file and return its AST."""
     try:
-        with open(file_path, 'r', encoding='utf-8') as file:
+        with open(file_path, "r", encoding="utf-8") as file:
             return ast.parse(file.read(), filename=file_path)
     except SyntaxError as e:
         logger.warning(f"Syntax error in {file_path}: {e}")
@@ -39,38 +38,57 @@ def parse_python_file(file_path: str) -> Optional[ast.AST]:
 def find_project_python_files(project_path: str) -> List[str]:
     """
     Find all Python files within the project directory only.
-    
+
     Does not include external libraries (site-packages, etc.)
     """
     py_files: List[str] = []
-    
+
     # Directories to exclude
     exclude_dirs = {
-        '__pycache__', '.git', '.svn', '.hg', '.tox', '.nox',
-        '.pytest_cache', '.mypy_cache', 'venv', 'env', '.venv', '.env',
-        'node_modules', 'build', 'dist', '*.egg-info', 'site-packages',
-        '.idea', '.vscode', 'htmlcov', 'coverage', '.coverage',
-    }
-    
-    # Files to exclude
-    exclude_files = {
-        'setup.py', 'conftest.py',
+        "__pycache__",
+        ".git",
+        ".svn",
+        ".hg",
+        ".tox",
+        ".nox",
+        ".pytest_cache",
+        ".mypy_cache",
+        "venv",
+        "env",
+        ".venv",
+        ".env",
+        "node_modules",
+        "build",
+        "dist",
+        "*.egg-info",
+        "site-packages",
+        ".idea",
+        ".vscode",
+        "htmlcov",
+        "coverage",
+        ".coverage",
     }
 
-    if os.path.isfile(project_path) and project_path.endswith('.py'):
+    # Files to exclude
+    exclude_files = {
+        "setup.py",
+        "conftest.py",
+    }
+
+    if os.path.isfile(project_path) and project_path.endswith(".py"):
         return [project_path]
 
     for root, dirs, files in os.walk(project_path):
         # Filter out excluded directories
-        dirs[:] = [
-            d for d in dirs 
-            if d not in exclude_dirs and not d.endswith('.egg-info')
-        ]
+        dirs[:] = [d for d in dirs if d not in exclude_dirs and not d.endswith(".egg-info")]
 
         for file in files:
-            if file.endswith('.py') and file not in exclude_files:
+            if file.endswith(".py") and file not in exclude_files:
                 py_files.append(os.path.join(root, file))
 
+    # Sort for deterministic analysis order (critical for byte-stable output
+    # so the CI self-healing docs bot never produces phantom diffs).
+    py_files.sort()
     logger.info(f"Found {len(py_files)} Python files in project")
     return py_files
 
@@ -78,7 +96,7 @@ def find_project_python_files(project_path: str) -> List[str]:
 def get_module_name(file_path: str, project_root: str) -> str:
     """
     Get the module name from a file path relative to project root.
-    
+
     Handles both regular packages (with __init__.py) and namespace packages (PEP 420).
     """
     # Normalize paths
@@ -93,7 +111,7 @@ def get_module_name(file_path: str, project_root: str) -> str:
         rel_path = os.path.basename(file_path)
 
     # Convert path separators to module separators
-    rel_path = rel_path.replace(os.sep, '/')
+    rel_path = rel_path.replace(os.sep, "/")
 
     # Build module name
     module_parts: List[str] = []
@@ -104,10 +122,10 @@ def get_module_name(file_path: str, project_root: str) -> str:
     module_parts.insert(0, file_name)
 
     # Add package hierarchy
-    while current_path and current_path != '.':
+    while current_path and current_path != ".":
         # Check for both regular packages with __init__.py and namespace packages (PEP 420)
-        init_path = os.path.join(project_root, current_path, '__init__.py')
-        
+        init_path = os.path.join(project_root, current_path, "__init__.py")
+
         # Check if this directory contains subdirectories that are packages
         full_dir_path = os.path.join(project_root, current_path)
         is_namespace = False
@@ -115,7 +133,7 @@ def get_module_name(file_path: str, project_root: str) -> str:
             try:
                 is_namespace = any(
                     os.path.isdir(os.path.join(full_dir_path, d))
-                    and os.path.exists(os.path.join(full_dir_path, d, '__init__.py'))
+                    and os.path.exists(os.path.join(full_dir_path, d, "__init__.py"))
                     for d in os.listdir(full_dir_path)
                     if os.path.isdir(os.path.join(full_dir_path, d))
                 )
@@ -127,66 +145,51 @@ def get_module_name(file_path: str, project_root: str) -> str:
 
         current_path = os.path.dirname(current_path)
 
-    return '.'.join(module_parts)
+    return ".".join(module_parts)
 
 
 def analyze_project(
-    py_files: List[str],
-    project_root: str
+    py_files: List[str], project_root: str
 ) -> Tuple[Dict[str, ModuleAnalyzer], List[Dict]]:
     """
     Analyze all modules in the project and extract function calls.
-    
+
     Returns:
         A tuple of (module_analyzers, all_calls) where:
         - module_analyzers: Dict mapping module names to their analyzers
         - all_calls: List of all function calls found
     """
-    # First pass: analyze modules and collect class/function definitions
+    # First pass: analyze modules and collect class/function definitions.
     module_analyzers: Dict[str, ModuleAnalyzer] = {}
     all_module_names: Set[str] = set()
 
-    # Process files in parallel for better performance
+    # Parse files in parallel for speed, but assemble results in a stable,
+    # sorted order so the downstream graph and rendered output are byte-stable
+    # across runs (required by the CI self-healing docs bot).
+    ordered = sorted(
+        (file_path, get_module_name(file_path, project_root)) for file_path in py_files
+    )
     max_workers = min(os.cpu_count() or 4, 8)
-    
+
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-        # First, parse all files
-        future_to_file = {
-            executor.submit(parse_python_file, file_path): (
-                file_path,
-                get_module_name(file_path, project_root)
+        parsed = list(executor.map(parse_python_file, [fp for fp, _ in ordered]))
+
+    for (file_path, module_name), tree in zip(ordered, parsed):
+        all_module_names.add(module_name)
+        if tree is not None:
+            logger.debug(f"Parsed module: {module_name}")
+            module_analyzers[module_name] = ModuleAnalyzer(
+                module_name, file_path, tree, project_root
             )
-            for file_path in py_files
-        }
 
-        # Collect results
-        for future in concurrent.futures.as_completed(future_to_file):
-            file_path, module_name = future_to_file[future]
-            try:
-                tree = future.result()
-            except Exception as e:
-                logger.warning(f"Error parsing {file_path}: {e}")
-                continue
-                
-            all_module_names.add(module_name)
-
-            if tree:
-                logger.debug(f"Parsed module: {module_name}")
-                module_analyzers[module_name] = ModuleAnalyzer(
-                    module_name, file_path, tree, project_root
-                )
-
-    # Second pass: analyze function calls (needs to be sequential due to dependencies)
+    # Second pass: analyze function calls (sequential; needs the full table).
     all_calls: List[Dict] = []
 
-    for module_name, analyzer in module_analyzers.items():
+    for module_name in sorted(module_analyzers):
+        analyzer = module_analyzers[module_name]
         logger.debug(f"Analyzing function calls in: {module_name}")
         visitor = FunctionCallVisitor(
-            module_name,
-            analyzer.file_path,
-            analyzer,
-            module_analyzers,
-            all_module_names
+            module_name, analyzer.file_path, analyzer, module_analyzers, all_module_names
         )
         visitor.visit(analyzer.tree)
         all_calls.extend(visitor.calls)

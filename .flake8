@@ -1,0 +1,16 @@
+[flake8]
+max-line-length = 100
+extend-ignore = E203, W503
+per-file-ignores =
+    # These modules embed large HTML/CSS/JS templates as raw strings; line
+    # length and trailing-whitespace rules don't meaningfully apply to them.
+    pyvisualizer/visualizers/html.py: E501, W293, E731, E741
+    pyvisualizer/visualizers/mermaid.py: E501, W293
+    # Test fixtures embed multi-line source snippets; pytest is imported by
+    # convention even when only fixtures/markers are used.
+    tests/*: E501, F401, W293
+exclude =
+    .venv,
+    build,
+    dist,
+    docs

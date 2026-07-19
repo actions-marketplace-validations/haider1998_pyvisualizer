@@ -1,0 +1,87 @@
+name: 'PyVisualizer — Architecture Ground Truth'
+description: >-
+  Deterministic, AST-verified Python architecture diagrams and gates.
+  Self-heal a README diagram, post a PR architecture-change report, or fail the
+  build on new circular dependencies and layering violations.
+author: 'Syed Mohd Haider Rizvi'
+branding:
+  icon: 'git-merge'
+  color: 'purple'
+
+inputs:
+  mode:
+    description: 'readme | pr-comment | gate | json'
+    required: true
+    default: 'readme'
+  path:
+    description: 'Path to analyze'
+    required: false
+    default: '.'
+  target:
+    description: 'Markdown file to update (readme mode)'
+    required: false
+    default: 'README.md'
+  detail:
+    description: 'Diagram granularity: module | class | function'
+    required: false
+    default: 'module'
+  exclude:
+    description: 'Space-separated module patterns to exclude'
+    required: false
+    default: 'tests'
+  fail-on-cycles:
+    description: 'Fail the build on circular dependencies (gate mode)'
+    required: false
+    default: 'true'
+  python-version:
+    description: 'Python version to run under'
+    required: false
+    default: '3.11'
+  version:
+    description: 'py-code-visualizer version spec (e.g. ==2.0.0)'
+    required: false
+    default: ''
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ inputs.python-version }}
+
+    - name: Install PyVisualizer
+      shell: bash
+      run: python -m pip install --upgrade "py-code-visualizer${{ inputs.version }}"
+
+    - name: Run PyVisualizer (${{ inputs.mode }})
+      shell: bash
+      env:
+        PV_MODE: ${{ inputs.mode }}
+        PV_PATH: ${{ inputs.path }}
+        PV_TARGET: ${{ inputs.target }}
+        PV_DETAIL: ${{ inputs.detail }}
+        PV_EXCLUDE: ${{ inputs.exclude }}
+        PV_FAIL_CYCLES: ${{ inputs.fail-on-cycles }}
+      run: |
+        set -euo pipefail
+        case "$PV_MODE" in
+          readme)
+            py-code-visualizer readme "$PV_PATH" \
+              --target "$PV_TARGET" --detail "$PV_DETAIL" --exclude $PV_EXCLUDE
+            ;;
+          gate)
+            EXTRA=""
+            [ "$PV_FAIL_CYCLES" = "true" ] && EXTRA="--fail-on-cycles"
+            py-code-visualizer check "$PV_PATH" $EXTRA --exclude $PV_EXCLUDE
+            ;;
+          json)
+            py-code-visualizer json "$PV_PATH" -o architecture.json --exclude $PV_EXCLUDE
+            ;;
+          pr-comment)
+            echo "Use the reusable pr-diagram workflow for PR comments." >&2
+            py-code-visualizer json "$PV_PATH" -o architecture.json --exclude $PV_EXCLUDE
+            ;;
+          *)
+            echo "Unknown mode: $PV_MODE" >&2; exit 1;;
+        esac

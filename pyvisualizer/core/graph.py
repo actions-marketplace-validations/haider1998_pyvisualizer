@@ -3,21 +3,47 @@ Function call graph construction.
 
 This module provides the FunctionCallVisitor for extracting function calls
 and building a call graph from analyzed Python modules.
+
+Core principle — *Ground Truth, never guesswork*:
+    Every edge carries a ``confidence`` (resolved / inherited / ambiguous) and a
+    ``file:line`` provenance. Calls that could match several definitions are
+    tagged ``ambiguous`` with the full candidate list preserved — we never
+    silently pick one and present it as fact. Calls to code outside the project
+    (stdlib, third-party) produce no edge rather than an invented one.
 """
 
 import ast
 import logging
-from typing import Dict, List, Set, Optional, Tuple, Any
+from typing import Any, Dict, List, NamedTuple, Optional, Set
 
 import networkx as nx
 
 from pyvisualizer.core.analyzer import ModuleAnalyzer
+from pyvisualizer.core.model import (
+    CONFIDENCE_AMBIGUOUS,
+    CONFIDENCE_INHERITED,
+    CONFIDENCE_RESOLVED,
+)
 
 logger = logging.getLogger("pyvisualizer.graph")
 
+# Resolution mechanisms that are eligible for a project-wide short-name
+# fallback when the primary resolution did not land on a known node.
+_FALLBACK_VIA = {"name", "attr", "self-fallback"}
+
+
+class Resolution(NamedTuple):
+    """The outcome of resolving a single call expression."""
+
+    target: Optional[str] = None  # best-effort qualified/partial target
+    exact: bool = False  # target is a verified project node
+    via: str = ""  # mechanism: import/self/typed-var/class/super/name/attr...
+    base: bool = False  # resolved through a base class (inheritance)
+    external: bool = False  # resolves outside the project -> emit no edge
+
 
 class FunctionCallVisitor(ast.NodeVisitor):
-    """AST visitor to extract function calls."""
+    """AST visitor to extract function calls with provenance and confidence."""
 
     def __init__(
         self,
@@ -25,61 +51,51 @@ class FunctionCallVisitor(ast.NodeVisitor):
         file_path: str,
         module_analyzer: ModuleAnalyzer,
         all_modules: Dict[str, ModuleAnalyzer],
-        all_module_names: Set[str]
+        all_module_names: Set[str],
     ):
         self.current_function: Optional[str] = None
         self.current_class: Optional[str] = None
-        self.class_stack: List[str] = []  # Track nested classes
-        self.function_stack: List[str] = []  # Track nested functions
+        self.class_stack: List[str] = []
+        self.function_stack: List[str] = []
         self.module_name = module_name
         self.file_path = file_path
         self.module_analyzer = module_analyzer
         self.all_modules = all_modules
         self.all_module_names = all_module_names
         self.calls: List[Dict[str, Any]] = []
-        self.class_instances: Dict[str, str] = {}  # Maps variable names to class types
-        self.current_class_vars: Dict[str, str] = {}  # Maps 'self.var' to their types in current class
-        self.context_managers: Dict[str, str] = {}  # Track variables created in context managers
+        self.class_instances: Dict[str, str] = {}  # var name -> class name
+        self.current_class_vars: Dict[str, str] = {}  # 'self.x' -> class name
+        self.context_managers: Dict[str, str] = {}
 
-        # Cache to avoid repeated lookups
-        self._method_cache: Dict[str, Optional[Tuple[str, Optional[str]]]] = {}
         self._class_cache: Dict[str, Optional[str]] = {}
 
+    # ------------------------------------------------------------------ scopes
     def visit_ClassDef(self, node: ast.ClassDef) -> None:
-        """Visit a class definition."""
         previous_class = self.current_class
-        # Handle nested classes
         if self.class_stack:
-            parent_class = self.class_stack[-1]
-            self.current_class = f"{parent_class}.{node.name}"
+            self.current_class = f"{self.class_stack[-1]}.{node.name}"
         else:
             self.current_class = f"{self.module_name}.{node.name}"
 
         self.class_stack.append(self.current_class)
-        previous_vars = self.current_class_vars.copy()
-        self.current_class_vars = {}  # Reset for this class
+        previous_vars = self.current_class_vars
+        self.current_class_vars = {}
 
-        # Visit all children to find methods and assignments
         self.generic_visit(node)
 
-        # Restore context
         self.class_stack.pop()
         self.current_class = previous_class
         self.current_class_vars = previous_vars
 
     def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
-        """Visit a function definition."""
         self._visit_function_common(node)
 
     def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
-        """Visit an async function definition."""
         self._visit_function_common(node)
 
-    def _visit_function_common(self, node: ast.FunctionDef | ast.AsyncFunctionDef) -> None:
-        """Common handling for function and async function definitions."""
+    def _visit_function_common(self, node: Any) -> None:
         parent_func = self.current_function
 
-        # Build the full function name based on context
         if self.class_stack:
             self.current_function = f"{self.class_stack[-1]}.{node.name}"
         else:
@@ -87,40 +103,54 @@ class FunctionCallVisitor(ast.NodeVisitor):
 
         self.function_stack.append(self.current_function)
 
-        # Process decorators before visiting the function body
+        # Scope local variable typing to this function body so a name in one
+        # function never leaks into a sibling.
+        saved_instances = self.class_instances
+        self.class_instances = dict(saved_instances)
+        self._seed_param_types(node)
+
         for decorator in node.decorator_list:
             self.visit(decorator)
 
-        # Visit all children to find calls
         self.generic_visit(node)
 
-        # Restore parent function context
+        self.class_instances = saved_instances
         self.function_stack.pop()
         self.current_function = parent_func if self.function_stack else None
 
-    def visit_Assign(self, node: ast.Assign) -> None:
-        """Visit an assignment statement to track variables."""
-        # Only process if we have a value that is potentially a class instance
-        if isinstance(node.value, ast.Call):
-            # Get the class name being instantiated
-            class_name = self._extract_call_target(node.value)
+    def _seed_param_types(self, node: Any) -> None:
+        """Seed variable typing from annotated parameters (e.g. ``x: Client``)."""
+        info = self.module_analyzer.functions.get(self.current_function or "")
+        if not info:
+            return
+        for arg_name, ann in info.get("arg_types", {}).items():
+            cls = self._annotation_class(ann)
+            if cls:
+                self.class_instances[arg_name] = cls
 
-            # Record the variable assignment
+    @staticmethod
+    def _annotation_class(ann: Any) -> Optional[str]:
+        if not isinstance(ann, dict):
+            return None
+        if ann.get("type") == "name":
+            return ann.get("name")
+        if ann.get("type") == "subscript":
+            return ann.get("container")
+        return None
+
+    # ------------------------------------------------------------ assignments
+    def visit_Assign(self, node: ast.Assign) -> None:
+        if isinstance(node.value, ast.Call):
+            class_name = self._extract_call_target(node.value)
             for target in node.targets:
                 if isinstance(target, ast.Name):
-                    var_name = target.id
                     if class_name:
-                        self.class_instances[var_name] = class_name
+                        self.class_instances[target.id] = class_name
                 elif isinstance(target, ast.Attribute) and isinstance(target.value, ast.Name):
-                    # Handle self.var = something()
-                    if target.value.id == 'self' and self.current_class:
-                        var_name = f"self.{target.attr}"
+                    if target.value.id == "self" and self.current_class:
                         if class_name:
-                            self.current_class_vars[var_name] = class_name
-
-        # Handle tuple unpacking and other assignment types
+                            self.current_class_vars[f"self.{target.attr}"] = class_name
         elif isinstance(node.value, ast.Tuple):
-            # Check each item in the tuple for potential class instances
             for i, elt in enumerate(node.value.elts):
                 if isinstance(elt, ast.Call):
                     class_name = self._extract_call_target(elt)
@@ -128,384 +158,446 @@ class FunctionCallVisitor(ast.NodeVisitor):
                         target = node.targets[i]
                         if isinstance(target, ast.Name):
                             self.class_instances[target.id] = class_name
-
         self.generic_visit(node)
 
     def visit_AnnAssign(self, node: ast.AnnAssign) -> None:
-        """Visit an annotated assignment (variable with type hint)."""
-        # Record type annotation
-        if isinstance(node.target, ast.Name):
-            var_name = node.target.id
-            if node.annotation:
-                # This is a type hint that can help with resolution
-                annotation = self._process_annotation(node.annotation)
-                if annotation:
-                    self.class_instances[var_name] = annotation
-
-        # If there's a value being assigned, process it as well
+        if isinstance(node.target, ast.Name) and node.annotation:
+            annotation = self._process_annotation(node.annotation)
+            if annotation:
+                self.class_instances[node.target.id] = annotation
         if node.value and isinstance(node.value, ast.Call):
             class_name = self._extract_call_target(node.value)
             if class_name and isinstance(node.target, ast.Name):
                 self.class_instances[node.target.id] = class_name
-
         self.generic_visit(node)
 
     def visit_With(self, node: ast.With) -> None:
-        """Visit a with statement to track context managers."""
         for item in node.items:
             if isinstance(item.context_expr, ast.Call):
-                # The context manager expression is a call
                 class_name = self._extract_call_target(item.context_expr)
-
-                # If there's an optional_vars (the 'as' part)
                 if item.optional_vars and isinstance(item.optional_vars, ast.Name):
-                    var_name = item.optional_vars.id
                     if class_name:
-                        self.context_managers[var_name] = class_name
-                        # Also add to class instances for method resolution
-                        self.class_instances[var_name] = class_name
-
+                        self.context_managers[item.optional_vars.id] = class_name
+                        self.class_instances[item.optional_vars.id] = class_name
         self.generic_visit(node)
 
+    # ----------------------------------------------------------------- calls
     def visit_Call(self, node: ast.Call) -> None:
-        """Visit a function call."""
-        if not self.current_function:
-            # Skip calls outside of function definitions
-            self.generic_visit(node)
-            return
+        if self.current_function:
+            res = self._resolve_call(node)
+            if res.target and not res.external:
+                self.calls.append(
+                    {
+                        "caller": self.current_function,
+                        "lineno": node.lineno,
+                        "res": res,
+                    }
+                )
+        # Recurse into the *entire* call expression: the callee expression
+        # (so chained calls like get_client().fetch() capture the inner call),
+        # arguments, keywords, comprehensions and lambdas.
+        self.generic_visit(node)
 
-        # Extract call target and potential module/class context
-        target_function, module_path = self._resolve_call(node)
-
-        if target_function:
-            self.record_call(self.current_function, target_function, node.lineno)
-
-        # Don't forget to visit function arguments which might contain calls
-        for arg in node.args:
-            self.visit(arg)
-
-        for keyword in node.keywords:
-            self.visit(keyword.value)
-
-    def _resolve_call(self, node: ast.Call) -> Tuple[Optional[str], Optional[str]]:
-        """Resolve a function call to its fully qualified name if possible."""
+    def _resolve_call(self, node: ast.Call) -> Resolution:
+        # --- bare name: func_name() --------------------------------------
         if isinstance(node.func, ast.Name):
-            # Direct function call: function_name()
             func_name = node.func.id
 
-            # Check if it's an imported name
             if func_name in self.module_analyzer.imports.import_map:
                 imported_path = self.module_analyzer.imports.import_map[func_name]
+                if "." in imported_path:
+                    module_path, short = imported_path.rsplit(".", 1)
+                    found = self._lookup_module_function(module_path, short)
+                    if found:
+                        return Resolution(found, exact=True, via="import")
+                    # Import resolves outside the project: no edge.
+                    return Resolution(imported_path, via="import", external=True)
+                return Resolution(imported_path, via="import", external=True)
 
-                # Check if this points to a function in a module
-                if '.' in imported_path:
-                    module_path, func_name = imported_path.rsplit('.', 1)
-                    # Look for this function in all modules
-                    for m_name, analyzer in self.all_modules.items():
-                        if m_name == module_path or m_name.endswith('.' + module_path):
-                            target = f"{m_name}.{func_name}"
-                            if target in analyzer.functions:
-                                return target, module_path
-
-                    # If we didn't find a direct match, this might be a module.function reference
-                    return imported_path, None
-                else:
-                    # It's a module import with alias, but we can't resolve the function
-                    return None, imported_path
-
-            # Check if it's a local function in current module
             local_target = f"{self.module_name}.{func_name}"
             if local_target in self.module_analyzer.functions:
-                return local_target, None
+                return Resolution(local_target, exact=True, via="local")
 
-            # Check if it might be in any of the star-imported modules
-            for star_module in self.module_analyzer.imports.star_imports:
-                for m_name, analyzer in self.all_modules.items():
-                    if m_name == star_module or m_name.endswith('.' + star_module):
-                        candidate = f"{m_name}.{func_name}"
-                        if candidate in analyzer.functions:
-                            return candidate, star_module
+            # A locally instantiated class used as a callable? (rare) -> skip.
+            # Otherwise defer to a project-wide short-name lookup.
+            return Resolution(func_name, via="name")
 
-            # If we can't resolve it, just return the name for later resolution
-            return func_name, None
+        # --- attribute call: obj.method() --------------------------------
+        if isinstance(node.func, ast.Attribute):
+            value = node.func.value
+            method_name = node.func.attr
 
-        elif isinstance(node.func, ast.Attribute):
-            # Method or attribute call: object.method()
-            if isinstance(node.func.value, ast.Name):
-                obj_name = node.func.value.id
-                method_name = node.func.attr
+            # super().method()
+            if self._is_super_call(value) and self.current_class:
+                found = self._find_method_in_hierarchy(
+                    self.current_class, method_name, start_at_base=True
+                )
+                if found:
+                    return Resolution(found, exact=True, via="super", base=True)
+                return Resolution(None)
 
-                # Handle self.method() calls
-                if obj_name == 'self' and self.current_class:
-                    # Self method call within a class
-                    method_target = f"{self.current_class}.{method_name}"
+            if isinstance(value, ast.Name):
+                obj_name = value.id
 
-                    # Check if the method exists in this class
-                    if self.current_class in self.module_analyzer.classes:
-                        if method_name in self.module_analyzer.classes[self.current_class]['methods']:
-                            return method_target, None
+                # self.method()
+                if obj_name == "self" and self.current_class:
+                    found = self._find_method_in_hierarchy(self.current_class, method_name)
+                    if found:
+                        base = not found.startswith(self.current_class + ".")
+                        return Resolution(found, exact=True, via="self", base=base)
+                    return Resolution(method_name, via="self-fallback")
 
-                    # Method might be inherited, try to find it in base classes
-                    class_info = self.module_analyzer.classes.get(self.current_class)
-                    if class_info and class_info['bases']:
-                        for base_class in class_info['bases']:
-                            # Resolve the base class name to a full qualified name if needed
-                            full_base_name = self._resolve_class_name(base_class)
-                            if full_base_name:
-                                base_target = f"{full_base_name}.{method_name}"
-                                # Check if this method exists in any of the analyzers
-                                for analyzer in self.all_modules.values():
-                                    if base_target in analyzer.functions:
-                                        return base_target, None
-
-                    # Method might be inherited, but we'll still record the call
-                    return method_target, None
-
-                # Handle calls on class instances
+                # variable with a known class: obj.method()
                 if obj_name in self.class_instances:
-                    class_name = self.class_instances[obj_name]
+                    class_q = self._resolve_class_name(self.class_instances[obj_name])
+                    if class_q:
+                        found = self._find_method_in_hierarchy(class_q, method_name)
+                        if found:
+                            base = not found.startswith(class_q + ".")
+                            return Resolution(found, exact=True, via="typed-var", base=base)
+                    return Resolution(method_name, via="attr")
 
-                    # Cache key for performance
-                    cache_key = f"{class_name}::{method_name}"
-                    if cache_key in self._method_cache:
-                        return self._method_cache[cache_key]
+                # ClassName.method()  (static/class methods, direct class ref)
+                class_q = self._resolve_class_name(obj_name)
+                if class_q:
+                    found = self._find_method_in_hierarchy(class_q, method_name)
+                    if found:
+                        base = not found.startswith(class_q + ".")
+                        return Resolution(found, exact=True, via="class", base=base)
 
-                    # Try to find the class definition
-                    for m_name, analyzer in self.all_modules.items():
-                        for c_name, c_info in analyzer.classes.items():
-                            c_short_name = c_info['name']
-                            if class_name.endswith('.' + c_short_name) or class_name == c_short_name:
-                                # Found the class, now check for the method
-                                if method_name in c_info['methods']:
-                                    result = (f"{c_name}.{method_name}", None)
-                                    self._method_cache[cache_key] = result
-                                    return result
-
-                                # Check base classes for inherited methods
-                                for base_class in c_info.get('bases', []):
-                                    full_base_name = self._resolve_class_name(base_class)
-                                    if full_base_name:
-                                        for analyzer2 in self.all_modules.values():
-                                            if full_base_name in analyzer2.classes:
-                                                base_info = analyzer2.classes[full_base_name]
-                                                if method_name in base_info['methods']:
-                                                    result = (f"{full_base_name}.{method_name}", None)
-                                                    self._method_cache[cache_key] = result
-                                                    return result
-
-                    # If can't find exact method, return with class name for later resolution
-                    result = (f"{class_name}.{method_name}", None)
-                    self._method_cache[cache_key] = result
-                    return result
-
-                # Handle module method calls
+                # module.function()
                 if obj_name in self.module_analyzer.imports.import_map:
                     module_path = self.module_analyzer.imports.import_map[obj_name]
+                    found = self._lookup_module_function(module_path, method_name)
+                    if found:
+                        return Resolution(found, exact=True, via="import")
+                    return Resolution(f"{module_path}.{method_name}", via="import", external=True)
 
-                    # Check if this might be a module.function call
-                    for m_name, analyzer in self.all_modules.items():
-                        if m_name == module_path or m_name.endswith('.' + module_path):
-                            target = f"{m_name}.{method_name}"
-                            if target in analyzer.functions:
-                                return target, module_path
-
-                    # If not found, return for later resolution
-                    return f"{module_path}.{method_name}", module_path
-
-                # Check if this is a context manager variable
                 if obj_name in self.context_managers:
-                    class_name = self.context_managers[obj_name]
-                    return f"{class_name}.{method_name}", None
+                    class_q = self._resolve_class_name(self.context_managers[obj_name])
+                    if class_q:
+                        found = self._find_method_in_hierarchy(class_q, method_name)
+                        if found:
+                            return Resolution(found, exact=True, via="context")
+                    return Resolution(method_name, via="attr")
 
-            # Handle nested attribute access like module.submodule.function()
-            elif isinstance(node.func.value, ast.Attribute):
-                # Extract the full attribute chain
+                # Unknown object type: eligible for a *unique-only* fallback.
+                return Resolution(method_name, via="attr")
+
+            # nested attribute: pkg.mod.function()
+            if isinstance(value, ast.Attribute):
                 parts = self._extract_attribute_chain(node.func)
                 if len(parts) >= 2:
-                    obj_path = '.'.join(parts[:-1])
-                    method_name = parts[-1]
+                    obj_path = ".".join(parts[:-1])
+                    found = self._lookup_module_function(obj_path, parts[-1])
+                    if found:
+                        return Resolution(found, exact=True, via="import")
+                    return Resolution(f"{obj_path}.{parts[-1]}", via="attr")
 
-                    # Check if the parts correspond to a known module or class
-                    for m_name, analyzer in self.all_modules.items():
-                        # Check if the object path matches or ends with a module name
-                        if m_name == obj_path or m_name.endswith('.' + obj_path):
-                            target = f"{m_name}.{method_name}"
-                            if target in analyzer.functions:
-                                return target, obj_path
+            # method call on a call result: get_client().fetch()
+            # The inner call is captured by generic_visit; the outer method's
+            # receiver type is unknown, so allow a unique-only fallback.
+            if isinstance(value, ast.Call):
+                return Resolution(method_name, via="attr")
 
-                    # Return best effort result for later resolution
-                    return f"{obj_path}.{method_name}", obj_path
+        return Resolution(None)
 
-        return None, None
+    @staticmethod
+    def _is_super_call(node: ast.AST) -> bool:
+        return (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "super"
+        )
+
+    def _lookup_module_function(self, module_path: str, func_name: str) -> Optional[str]:
+        """Find ``module_path.func_name`` among project modules, if present."""
+        for m_name, analyzer in self.all_modules.items():
+            if m_name == module_path or m_name.endswith("." + module_path):
+                target = f"{m_name}.{func_name}"
+                if target in analyzer.functions:
+                    return target
+        return None
+
+    def _lookup_class(self, class_q: str) -> Optional[Dict[str, Any]]:
+        for analyzer in self.all_modules.values():
+            info = analyzer.classes.get(class_q)
+            if info:
+                return info
+        return None
+
+    def _find_method_in_hierarchy(
+        self, class_q: str, method_name: str, start_at_base: bool = False
+    ) -> Optional[str]:
+        """Resolve ``method_name`` on ``class_q`` through its MRO.
+
+        Returns the qualified target if found (in the class or any resolvable
+        ancestor), else ``None``. When ``start_at_base`` is set the class
+        itself is skipped (used for ``super()``).
+        """
+        visited: Set[str] = set()
+        queue: List[str] = []
+        if start_at_base:
+            info = self._lookup_class(class_q)
+            if info:
+                for b in info.get("bases", []):
+                    bq = self._resolve_class_name(b)
+                    if bq:
+                        queue.append(bq)
+        else:
+            queue.append(class_q)
+
+        while queue:
+            cq = queue.pop(0)
+            if cq in visited:
+                continue
+            visited.add(cq)
+            info = self._lookup_class(cq)
+            if not info:
+                continue
+            if method_name in info["methods"]:
+                return f"{cq}.{method_name}"
+            for b in info.get("bases", []):
+                bq = self._resolve_class_name(b)
+                if bq and bq not in visited:
+                    queue.append(bq)
+        return None
 
     def _resolve_class_name(self, class_name: str) -> Optional[str]:
-        """Resolve a class name to its fully qualified name."""
-        # Check cache first
         if class_name in self._class_cache:
             return self._class_cache[class_name]
 
-        # If it's already a fully qualified name
-        for m_name, analyzer in self.all_modules.items():
+        result: Optional[str] = None
+        for analyzer in self.all_modules.values():
             if class_name in analyzer.classes:
-                self._class_cache[class_name] = class_name
-                return class_name
+                result = class_name
+                break
+        if result is None and class_name in self.module_analyzer.imports.import_map:
+            imported = self.module_analyzer.imports.import_map[class_name]
+            # Only accept if it names a known project class.
+            for analyzer in self.all_modules.values():
+                if imported in analyzer.classes:
+                    result = imported
+                    break
+                # Try short-name match at tail.
+                for cq in analyzer.classes:
+                    if cq.endswith("." + imported.split(".")[-1]):
+                        result = cq
+                        break
+                if result:
+                    break
+        if result is None:
+            local_class = f"{self.module_name}.{class_name}"
+            if local_class in self.module_analyzer.classes:
+                result = local_class
+        if result is None:
+            # Match by bare class short-name across the project (last resort).
+            short = class_name.split(".")[-1]
+            for analyzer in self.all_modules.values():
+                for cq, cinfo in analyzer.classes.items():
+                    if cinfo["name"] == short:
+                        result = cq
+                        break
+                if result:
+                    break
 
-        # Check for imported classes
-        if class_name in self.module_analyzer.imports.import_map:
-            imported_path = self.module_analyzer.imports.import_map[class_name]
-            self._class_cache[class_name] = imported_path
-            return imported_path
-
-        # Check if it's a local class in the current module
-        local_class = f"{self.module_name}.{class_name}"
-        if local_class in self.module_analyzer.classes:
-            self._class_cache[class_name] = local_class
-            return local_class
-
-        # Try to find in star imports
-        for star_module in self.module_analyzer.imports.star_imports:
-            for m_name, analyzer in self.all_modules.items():
-                if m_name == star_module or m_name.endswith('.' + star_module):
-                    potential_class = f"{m_name}.{class_name}"
-                    if potential_class in analyzer.classes:
-                        self._class_cache[class_name] = potential_class
-                        return potential_class
-
-        # Not found
-        self._class_cache[class_name] = None
-        return None
+        self._class_cache[class_name] = result
+        return result
 
     def _extract_call_target(self, call_node: ast.Call) -> Optional[str]:
-        """Extract the target class or function being called."""
         if isinstance(call_node.func, ast.Name):
-            # Direct call: ClassName()
             target_name = call_node.func.id
-
-            # Check if it's an imported class
             if target_name in self.module_analyzer.imports.import_map:
                 return self.module_analyzer.imports.import_map[target_name]
-
-            # It might be a local class
             local_class = f"{self.module_name}.{target_name}"
             if local_class in self.module_analyzer.classes:
                 return local_class
-
-            # Otherwise, just return the name
             return target_name
-
-        elif isinstance(call_node.func, ast.Attribute):
-            # Qualified call: module.ClassName()
+        if isinstance(call_node.func, ast.Attribute):
             parts = self._extract_attribute_chain(call_node.func)
-            return '.'.join(parts) if parts else None
-
+            return ".".join(parts) if parts else None
         return None
 
     def _extract_attribute_chain(self, node: ast.AST) -> List[str]:
-        """Extract a chain of attribute access like module.submodule.function."""
-        parts: List[str] = []
-
-        # Handle the base case of a Name node
         if isinstance(node, ast.Name):
             return [node.id]
-
-        # Handle Attribute nodes recursively
-        elif isinstance(node, ast.Attribute):
-            # Get the value parts recursively
-            value_parts = self._extract_attribute_chain(node.value)
-            # Add the attribute
-            return value_parts + [node.attr]
-
-        return parts
+        if isinstance(node, ast.Attribute):
+            return self._extract_attribute_chain(node.value) + [node.attr]
+        return []
 
     def _process_annotation(self, node: ast.AST) -> Optional[str]:
-        """Process a type annotation and return a class name if possible."""
         if isinstance(node, ast.Name):
-            # Simple annotation: MyClass
             return node.id
-        elif isinstance(node, ast.Attribute):
-            # Qualified annotation: module.MyClass
+        if isinstance(node, ast.Attribute):
             parts = self._extract_attribute_chain(node)
-            return '.'.join(parts) if parts else None
-        elif isinstance(node, ast.Subscript):
-            # Generic type: List[MyClass]
-            # Just return the container type for now
+            return ".".join(parts) if parts else None
+        if isinstance(node, ast.Subscript):
             if isinstance(node.value, ast.Name):
                 return node.value.id
-            elif isinstance(node.value, ast.Attribute):
+            if isinstance(node.value, ast.Attribute):
                 parts = self._extract_attribute_chain(node.value)
-                return '.'.join(parts) if parts else None
+                return ".".join(parts) if parts else None
         return None
 
-    def record_call(self, caller: str, callee: str, lineno: int) -> None:
-        """Record a function call."""
-        self.calls.append({
-            'caller': caller,
-            'callee': callee,
-            'lineno': lineno
-        })
+
+def _short_name(qualified: str) -> str:
+    return qualified.split(".")[-1]
+
+
+def _disambiguate(caller: str, matches: List[str]) -> List[str]:
+    """Narrow a list of same-short-name candidates using caller context.
+
+    Returns a list: a single element means we disambiguated confidently;
+    more than one means the call is genuinely ambiguous.
+    """
+    if len(matches) <= 1:
+        return list(matches)
+
+    caller_parts = caller.split(".")
+    caller_module = caller_parts[0] if caller_parts else ""
+    caller_class = ".".join(caller_parts[:-1]) if len(caller_parts) >= 3 else None
+
+    # 1. same class as the caller
+    if caller_class:
+        same_class = [m for m in matches if ".".join(m.split(".")[:-1]) == caller_class]
+        if len(same_class) == 1:
+            return same_class
+
+    # 2. same module as the caller
+    same_module = [m for m in matches if m.startswith(caller_module + ".")]
+    if len(same_module) == 1:
+        return same_module
+
+    # Still ambiguous.
+    return sorted(matches)
 
 
 def build_call_graph(
-    module_analyzers: Dict[str, ModuleAnalyzer],
-    all_calls: List[Dict[str, Any]]
+    module_analyzers: Dict[str, ModuleAnalyzer], all_calls: List[Dict[str, Any]]
 ) -> nx.DiGraph:
-    """Build a call graph from the analyzed modules and calls."""
-    from pyvisualizer.core.resolver import resolve_function_call
-
+    """Build a directed call graph with confidence-tagged, sourced edges."""
     G = nx.DiGraph()
 
-    # Add nodes for all functions
-    for module_name, analyzer in module_analyzers.items():
-        for func_name, func_info in analyzer.functions.items():
-            G.add_node(func_name, **{
-                'name': func_info['name'],
-                'module': module_name,
-                'class': func_info.get('class'),
-                'lineno': func_info.get('lineno', 0),
-                'path': analyzer.file_path,
-                'is_async': func_info.get('is_async', False),
-                'is_property': func_info.get('is_property', False),
-                'decorators': func_info.get('decorators', [])
-            })
+    # Nodes (added in deterministic order).
+    for module_name in sorted(module_analyzers):
+        analyzer = module_analyzers[module_name]
+        for func_name in sorted(analyzer.functions):
+            func_info = analyzer.functions[func_name]
+            G.add_node(
+                func_name,
+                **{
+                    "name": func_info["name"],
+                    "module": module_name,
+                    "class": func_info.get("class"),
+                    "lineno": func_info.get("lineno", 0),
+                    "end_lineno": func_info.get("end_lineno"),
+                    "path": analyzer.file_path,
+                    "is_async": func_info.get("is_async", False),
+                    "is_property": func_info.get("is_property", False),
+                    "is_static": func_info.get("is_static", False),
+                    "is_classmethod": func_info.get("is_classmethod", False),
+                    "is_method": func_info.get("is_method", False),
+                    "is_nested": func_info.get("is_nested", False),
+                    "decorators": func_info.get("decorators", []),
+                    "decorator_names": func_info.get("decorator_names", []),
+                    "args": func_info.get("args", []),
+                },
+            )
 
-    # Build a lookup table for resolving function names
+    # Short-name lookup for project-wide fallback resolution.
     function_lookup: Dict[str, List[str]] = {}
-    for module_name, analyzer in module_analyzers.items():
-        for func_name in analyzer.functions:
-            # Extract the short name (without module/class)
-            short_name = func_name.split('.')[-1]
-            if short_name not in function_lookup:
-                function_lookup[short_name] = []
-            function_lookup[short_name].append(func_name)
+    for func_name in G.nodes:
+        function_lookup.setdefault(_short_name(func_name), []).append(func_name)
+    for key in function_lookup:
+        function_lookup[key].sort()
 
-    # Add edges for function calls
+    # File lookup for edge provenance.
+    node_file = {n: G.nodes[n].get("path", "") for n in G.nodes}
+
+    # Deterministic edge processing: aggregate then emit sorted.
+    edges: Dict[tuple, Dict[str, Any]] = {}
+
+    def _consider(
+        caller: str,
+        callee: str,
+        lineno: int,
+        confidence: str,
+        via: str,
+        candidates: Optional[List[str]] = None,
+    ) -> None:
+        key = (caller, callee)
+        existing = edges.get(key)
+        if existing is None:
+            edges[key] = {
+                "lineno": lineno,
+                "confidence": confidence,
+                "via": via,
+                "candidates": candidates or [],
+                "file": node_file.get(caller, ""),
+            }
+        else:
+            # Prefer the highest-confidence explanation; keep earliest line.
+            from pyvisualizer.core.model import CONFIDENCE_ORDER
+
+            if CONFIDENCE_ORDER[confidence] < CONFIDENCE_ORDER[existing["confidence"]]:
+                existing["confidence"] = confidence
+                existing["via"] = via
+                existing["candidates"] = candidates or []
+            existing["lineno"] = min(existing["lineno"], lineno)
+
     for call in all_calls:
-        caller = call['caller']
-        callee = call['callee']
-        lineno = call['lineno']
-
-        # If caller and callee are both in the graph, add the edge directly
-        if caller in G.nodes and callee in G.nodes:
-            G.add_edge(caller, callee, lineno=lineno)
+        caller = call["caller"]
+        res: Resolution = call["res"]
+        lineno = call["lineno"]
+        target = res.target
+        if caller not in G or target is None:
             continue
 
-        # Try more advanced resolution
-        resolved_callee = resolve_function_call(
-            caller, callee, G, function_lookup, module_analyzers
-        )
-        if resolved_callee:
-            G.add_edge(caller, resolved_callee, lineno=lineno)
+        # Exact hit on a known node.
+        if res.exact and target in G:
+            conf = CONFIDENCE_INHERITED if res.base else CONFIDENCE_RESOLVED
+            _consider(caller, target, lineno, conf, res.via)
+            continue
 
-    # Handle cycles by marking edges that form cycles
+        # Fallback-eligible: resolve by project-wide short name.
+        if res.via in _FALLBACK_VIA:
+            short = _short_name(target)
+            matches = function_lookup.get(short, [])
+            if not matches:
+                continue  # external / builtin -> no invented edge
+            narrowed = _disambiguate(caller, matches)
+            if len(narrowed) == 1:
+                _consider(caller, narrowed[0], lineno, CONFIDENCE_RESOLVED, res.via + "-unique")
+            else:
+                representative = narrowed[0]
+                _consider(
+                    caller,
+                    representative,
+                    lineno,
+                    CONFIDENCE_AMBIGUOUS,
+                    res.via,
+                    candidates=narrowed,
+                )
+            continue
+
+        # exact target that isn't a project node, or external -> no edge.
+
+    for caller, callee in sorted(edges):
+        data = edges[(caller, callee)]
+        G.add_edge(caller, callee, **data)
+
+    _mark_cycles(G)
+    return G
+
+
+def _mark_cycles(G: nx.DiGraph) -> None:
+    """Flag edges that participate in a dependency cycle (deterministically)."""
     try:
-        cycles = list(nx.simple_cycles(G))
-        for cycle in cycles:
+        for cycle in nx.simple_cycles(G):
             for i in range(len(cycle)):
                 source = cycle[i]
                 target = cycle[(i + 1) % len(cycle)]
                 if G.has_edge(source, target):
-                    G.edges[source, target]['is_cycle'] = True
-    except Exception as e:
-        logger.warning(f"Could not detect cycles: {str(e)}")
-
-    return G
+                    G.edges[source, target]["is_cycle"] = True
+    except Exception as e:  # pragma: no cover - defensive
+        logger.warning(f"Could not detect cycles: {e}")

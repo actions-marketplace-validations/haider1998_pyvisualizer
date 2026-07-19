@@ -7,13 +7,14 @@ using Python's Abstract Syntax Trees (AST).
 
 import ast
 import logging
-from typing import Dict, List, Set, Optional, Any, NamedTuple
+from typing import Any, Dict, List, NamedTuple, Optional, Set
 
 logger = logging.getLogger("pyvisualizer.analyzer")
 
 
 class ImportInfo(NamedTuple):
     """Data structure to store information about imported names."""
+
     module: str
     name: str
     alias: str
@@ -27,7 +28,9 @@ class ImportCollector(ast.NodeVisitor):
         self.current_module = current_module
         self.project_root = project_root
         self.import_map: Dict[str, str] = {}  # Maps imported names to their module
-        self.import_from_map: Dict[str, Set[str]] = {}  # Maps module names to the set of names imported from them
+        self.import_from_map: Dict[str, Set[str]] = (
+            {}
+        )  # Maps module names to the set of names imported from them
         self.direct_imports: Set[str] = set()  # Set of directly imported modules
         self.all_modules: Set[str] = set()  # All modules encountered
         self.star_imports: Set[str] = set()  # Modules from which * was imported
@@ -51,9 +54,9 @@ class ImportCollector(ast.NodeVisitor):
             self.imports.append(ImportInfo(module_name, module_name, alias))
 
             # Also record the module components for qualified name resolution
-            parts = module_name.split('.')
+            parts = module_name.split(".")
             for i in range(1, len(parts) + 1):
-                partial_module = '.'.join(parts[:i])
+                partial_module = ".".join(parts[:i])
                 self.all_modules.add(partial_module)
 
         self.generic_visit(node)
@@ -65,7 +68,7 @@ class ImportCollector(ast.NodeVisitor):
             if node.level > 0:
                 module_name = self._resolve_relative_import(node.module, node.level)
             else:
-                module_name = node.module
+                module_name = node.module or ""
 
             self.all_modules.add(module_name)
 
@@ -73,11 +76,11 @@ class ImportCollector(ast.NodeVisitor):
                 self.import_from_map[module_name] = set()
 
             for name in node.names:
-                if name.name == '*':
+                if name.name == "*":
                     # Import all names - we'll need to resolve this later
-                    self.import_from_map[module_name].add('*')
+                    self.import_from_map[module_name].add("*")
                     self.star_imports.add(module_name)
-                    self.imports.append(ImportInfo(module_name, '*', '*', True))
+                    self.imports.append(ImportInfo(module_name, "*", "*", True))
                 else:
                     imported_name = name.name
                     alias = name.asname or imported_name
@@ -95,15 +98,17 @@ class ImportCollector(ast.NodeVisitor):
             return module_name or ""
 
         # Get the current package parts
-        parts = self.current_module.split('.')
+        parts = self.current_module.split(".")
 
         # For relative imports, go up 'level' packages
         if len(parts) < level:
-            logger.warning(f"Invalid relative import in {self.current_module}: level {level} too high")
+            logger.warning(
+                f"Invalid relative import in {self.current_module}: level {level} too high"
+            )
             # Return best effort
             package = ""
         else:
-            package = '.'.join(parts[:-level])
+            package = ".".join(parts[:-level])
 
         # Add the specified module if any
         if module_name:
@@ -141,104 +146,45 @@ class ModuleAnalyzer:
         self._collect_definitions()
 
     def _collect_definitions(self) -> None:
-        """Collect all class and function definitions from the module."""
-        class_stack: List[str] = []  # Track nested classes
+        """Collect all class and function definitions from the module.
 
-        for node in ast.walk(self.tree):
-            if isinstance(node, ast.ClassDef):
-                # Build full class name with proper nesting
-                parent_prefix = f"{class_stack[-1]}." if class_stack else self.module_name + "."
-                full_class_name = f"{parent_prefix}{node.name}"
-                class_stack.append(full_class_name)
+        Uses a proper recursive descent (``DefinitionCollector``) so that
+        nested classes, methods, and nested functions/closures all receive
+        correct fully-qualified names and none are missed.
+        """
+        collector = DefinitionCollector(self)
+        collector.visit(self.tree)
 
-                # Process inheritance
-                base_classes: List[str] = []
-                for base in node.bases:
-                    if isinstance(base, ast.Name):
-                        base_classes.append(base.id)
-                    elif isinstance(base, ast.Attribute):
-                        # Handle module.Class inheritance
-                        parts = self._extract_attribute_chain(base)
-                        if parts:
-                            base_classes.append('.'.join(parts))
+    def _decorator_names(self, node: ast.AST) -> List[str]:
+        """Return the simple names of a definition's decorators as strings."""
+        names: List[str] = []
+        for d in node.decorator_list:  # type: ignore[attr-defined]
+            info = self._process_decorator(d)
+            name = info.get("name")
+            if name:
+                names.append(name)
+        return names
 
-                self.classes[full_class_name] = {
-                    'name': node.name,
-                    'module': self.module_name,
-                    'bases': base_classes,
-                    'methods': {},
-                    'node': node,
-                    'decorators': [self._process_decorator(d) for d in node.decorator_list]
-                }
+    def _arg_names(self, node: ast.AST) -> List[str]:
+        """Return the positional/keyword argument names of a def node."""
+        args = node.args  # type: ignore[attr-defined]
+        names = [a.arg for a in getattr(args, "posonlyargs", [])]
+        names += [a.arg for a in args.args]
+        if args.vararg:
+            names.append("*" + args.vararg.arg)
+        names += [a.arg for a in args.kwonlyargs]
+        if args.kwarg:
+            names.append("**" + args.kwarg.arg)
+        return names
 
-                # Collect methods in the class
-                for item in node.body:
-                    if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                        method_name = f"{full_class_name}.{item.name}"
-
-                        # Check if this is a property
-                        is_property = any(
-                            d.id == 'property' if isinstance(d, ast.Name) else False
-                            for d in item.decorator_list
-                        )
-
-                        self.classes[full_class_name]['methods'][item.name] = {
-                            'name': item.name,
-                            'full_name': method_name,
-                            'node': item,
-                            'is_async': isinstance(item, ast.AsyncFunctionDef),
-                            'is_property': is_property,
-                            'decorators': [self._process_decorator(d) for d in item.decorator_list],
-                            'return_annotation': self._process_annotation(item.returns) if item.returns else None
-                        }
-
-                        # Extract argument types if available
-                        arg_types: Dict[str, Dict[str, Any]] = {}
-                        for arg in item.args.args:
-                            if arg.annotation:
-                                arg_types[arg.arg] = self._process_annotation(arg.annotation)
-
-                        # Also add to functions map for consistency
-                        self.functions[method_name] = {
-                            'name': item.name,
-                            'module': self.module_name,
-                            'class': full_class_name,
-                            'full_name': method_name,
-                            'lineno': item.lineno,
-                            'node': item,
-                            'is_async': isinstance(item, ast.AsyncFunctionDef),
-                            'is_property': is_property,
-                            'decorators': [self._process_decorator(d) for d in item.decorator_list],
-                            'return_annotation': self._process_annotation(item.returns) if item.returns else None,
-                            'arg_types': arg_types
-                        }
-
-                # After processing the class, remove it from the stack
-                class_stack.pop()
-
-            elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and not class_stack:
-                # Skip methods, we handle them above
-                func_name = f"{self.module_name}.{node.name}"
-
-                # Extract argument types if available
-                arg_types = {}
-                for arg in node.args.args:
-                    if arg.annotation:
-                        arg_types[arg.arg] = self._process_annotation(arg.annotation)
-
-                self.functions[func_name] = {
-                    'name': node.name,
-                    'module': self.module_name,
-                    'class': None,
-                    'full_name': func_name,
-                    'lineno': node.lineno,
-                    'node': node,
-                    'is_async': isinstance(node, ast.AsyncFunctionDef),
-                    'is_property': False,
-                    'decorators': [self._process_decorator(d) for d in node.decorator_list],
-                    'return_annotation': self._process_annotation(node.returns) if node.returns else None,
-                    'arg_types': arg_types
-                }
+    def _arg_types(self, node: ast.AST) -> Dict[str, Dict[str, Any]]:
+        """Extract annotated argument types for a def node."""
+        arg_types: Dict[str, Dict[str, Any]] = {}
+        args = node.args  # type: ignore[attr-defined]
+        for arg in list(getattr(args, "posonlyargs", [])) + list(args.args) + list(args.kwonlyargs):
+            if arg.annotation is not None:
+                arg_types[arg.arg] = self._process_annotation(arg.annotation)
+        return arg_types
 
     def _extract_attribute_chain(self, node: ast.AST) -> List[str]:
         """Extract a chain of attribute access like module.submodule.Class."""
@@ -261,22 +207,26 @@ class ModuleAnalyzer:
         """Process a decorator node and extract information."""
         if isinstance(node, ast.Name):
             # Simple decorator: @decorator_name
-            return {'type': 'name', 'name': node.id}
+            return {"type": "name", "name": node.id}
         elif isinstance(node, ast.Call):
             # Decorator with arguments: @decorator(args)
             if isinstance(node.func, ast.Name):
-                return {'type': 'call', 'name': node.func.id, 'args': self._extract_call_args(node)}
+                return {"type": "call", "name": node.func.id, "args": self._extract_call_args(node)}
             elif isinstance(node.func, ast.Attribute):
                 # Qualified decorator: @module.decorator(args)
                 parts = self._extract_attribute_chain(node.func)
-                return {'type': 'call', 'name': '.'.join(parts), 'args': self._extract_call_args(node)}
+                return {
+                    "type": "call",
+                    "name": ".".join(parts),
+                    "args": self._extract_call_args(node),
+                }
         elif isinstance(node, ast.Attribute):
             # Qualified decorator: @module.decorator
             parts = self._extract_attribute_chain(node)
-            return {'type': 'name', 'name': '.'.join(parts)}
+            return {"type": "name", "name": ".".join(parts)}
 
         # Default for unknown decorator types
-        return {'type': 'unknown'}
+        return {"type": "unknown"}
 
     def _extract_call_args(self, call_node: ast.Call) -> Dict[str, Any]:
         """Extract arguments from a function call."""
@@ -284,13 +234,11 @@ class ModuleAnalyzer:
 
         # Process positional arguments
         if call_node.args:
-            args['positional'] = [
-                self._extract_arg_value(arg) for arg in call_node.args
-            ]
+            args["positional"] = [self._extract_arg_value(arg) for arg in call_node.args]
 
         # Process keyword arguments
         if call_node.keywords:
-            args['keywords'] = {
+            args["keywords"] = {
                 kw.arg: self._extract_arg_value(kw.value) for kw in call_node.keywords if kw.arg
             }
 
@@ -304,7 +252,7 @@ class ModuleAnalyzer:
             return f"variable:{node.id}"
         elif isinstance(node, ast.Attribute):
             parts = self._extract_attribute_chain(node)
-            return '.'.join(parts)
+            return ".".join(parts)
         # For other types, return a placeholder
         return "complex_value"
 
@@ -312,18 +260,18 @@ class ModuleAnalyzer:
         """Process a type annotation node."""
         if isinstance(node, ast.Name):
             # Simple annotation: int, str, etc.
-            return {'type': 'name', 'name': node.id}
+            return {"type": "name", "name": node.id}
         elif isinstance(node, ast.Attribute):
             # Qualified annotation: module.Class
             parts = self._extract_attribute_chain(node)
-            return {'type': 'name', 'name': '.'.join(parts)}
+            return {"type": "name", "name": ".".join(parts)}
         elif isinstance(node, ast.Subscript):
             # Generic type: List[int], Dict[str, int], etc.
             if isinstance(node.value, ast.Name):
                 container = node.value.id
             elif isinstance(node.value, ast.Attribute):
                 parts = self._extract_attribute_chain(node.value)
-                container = '.'.join(parts)
+                container = ".".join(parts)
             else:
                 container = "unknown"
 
@@ -337,7 +285,135 @@ class ModuleAnalyzer:
             else:
                 params.append(self._process_annotation(slice_value))
 
-            return {'type': 'subscript', 'container': container, 'params': params}
+            return {"type": "subscript", "container": container, "params": params}
 
         # For other types, return a placeholder
-        return {'type': 'unknown'}
+        return {"type": "unknown"}
+
+
+class _Scope(NamedTuple):
+    """A lexical scope on the definition-collector stack."""
+
+    kind: str  # 'module' | 'class' | 'function'
+    qualified: str  # fully-qualified name of this scope
+    class_qualified: Optional[str]  # nearest enclosing class, or None
+
+
+class DefinitionCollector(ast.NodeVisitor):
+    """Recursive-descent collector for class/function/method definitions.
+
+    Unlike a flat ``ast.walk``, this walks the tree depth-first with a real
+    scope stack, so nested classes (``module.Outer.Inner``), methods, and
+    nested functions/closures (``module.func.<locals>.inner``) all get
+    correct qualified names and are collected exactly once.
+    """
+
+    def __init__(self, analyzer: "ModuleAnalyzer") -> None:
+        self.analyzer = analyzer
+        self.module_name = analyzer.module_name
+        self.scope_stack: List[_Scope] = [_Scope("module", analyzer.module_name, None)]
+
+    @property
+    def _parent(self) -> _Scope:
+        return self.scope_stack[-1]
+
+    def _child_qualified(self, name: str) -> str:
+        parent = self._parent
+        if parent.kind == "function":
+            # Follow Python's __qualname__ convention for closures.
+            return f"{parent.qualified}.<locals>.{name}"
+        return f"{parent.qualified}.{name}"
+
+    def visit_ClassDef(self, node: ast.ClassDef) -> None:
+        qualified = self._child_qualified(node.name)
+
+        base_classes: List[str] = []
+        for base in node.bases:
+            if isinstance(base, ast.Name):
+                base_classes.append(base.id)
+            elif isinstance(base, ast.Attribute):
+                parts = self.analyzer._extract_attribute_chain(base)
+                if parts:
+                    base_classes.append(".".join(parts))
+
+        self.analyzer.classes[qualified] = {
+            "name": node.name,
+            "module": self.module_name,
+            "qualified": qualified,
+            "bases": base_classes,
+            "methods": {},
+            "node": node,
+            "lineno": node.lineno,
+            "decorators": [self.analyzer._process_decorator(d) for d in node.decorator_list],
+        }
+
+        self.scope_stack.append(_Scope("class", qualified, qualified))
+        self.generic_visit(node)
+        self.scope_stack.pop()
+
+    def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+        self._visit_function(node, is_async=False)
+
+    def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
+        self._visit_function(node, is_async=True)
+
+    def _visit_function(self, node: Any, is_async: bool) -> None:
+        parent = self._parent
+        qualified = self._child_qualified(node.name)
+        is_method = parent.kind == "class"
+        is_nested = parent.kind == "function"
+        class_qualified = parent.qualified if is_method else parent.class_qualified
+
+        decorator_names = self.analyzer._decorator_names(node)
+        is_property = "property" in decorator_names or any(
+            d.endswith(".setter") or d.endswith(".getter") or d.endswith(".deleter")
+            for d in decorator_names
+        )
+        is_static = "staticmethod" in decorator_names
+        is_classmethod = "classmethod" in decorator_names
+
+        arg_types = self.analyzer._arg_types(node)
+
+        info = {
+            "name": node.name,
+            "module": self.module_name,
+            "class": class_qualified if is_method else None,
+            "full_name": qualified,
+            "qualified": qualified,
+            "lineno": node.lineno,
+            "end_lineno": getattr(node, "end_lineno", None),
+            "node": node,
+            "is_async": is_async,
+            "is_property": is_property,
+            "is_static": is_static,
+            "is_classmethod": is_classmethod,
+            "is_method": is_method,
+            "is_nested": is_nested,
+            "decorators": [self.analyzer._process_decorator(d) for d in node.decorator_list],
+            "decorator_names": decorator_names,
+            "return_annotation": (
+                self.analyzer._process_annotation(node.returns) if node.returns else None
+            ),
+            "arg_types": arg_types,
+            "args": self.analyzer._arg_names(node),
+        }
+        self.analyzer.functions[qualified] = info
+
+        # Register direct methods on their owning class.
+        if is_method and class_qualified in self.analyzer.classes:
+            self.analyzer.classes[class_qualified]["methods"][node.name] = {
+                "name": node.name,
+                "full_name": qualified,
+                "node": node,
+                "is_async": is_async,
+                "is_property": is_property,
+                "is_static": is_static,
+                "is_classmethod": is_classmethod,
+                "decorators": info["decorators"],
+                "return_annotation": info["return_annotation"],
+            }
+
+        # Recurse so nested classes/functions inside this body are collected.
+        self.scope_stack.append(_Scope("function", qualified, class_qualified))
+        self.generic_visit(node)
+        self.scope_stack.pop()

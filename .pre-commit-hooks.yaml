@@ -1,0 +1,17 @@
+- id: pyvisualizer-readme
+  name: PyVisualizer — self-heal README architecture diagram
+  description: Inject/update the AST-verified Mermaid diagram in README.md.
+  entry: py-code-visualizer readme
+  language: python
+  pass_filenames: false
+  always_run: true
+  files: \.py$
+
+- id: pyvisualizer-gate
+  name: PyVisualizer — architecture gate (cycles + layering)
+  description: Fail the commit on new circular dependencies or layer violations.
+  entry: py-code-visualizer check --fail-on-cycles
+  language: python
+  pass_filenames: false
+  always_run: true
+  files: \.py$

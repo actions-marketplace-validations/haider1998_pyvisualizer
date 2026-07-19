@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "py-code-visualizer"
-version = "1.0.1"
-description = "Transform complex Python codebases into beautiful interactive diagrams"
+version = "2.0.0"
+description = "Deterministic, AST-verified architecture ground truth for Python — self-healing diagrams, CI gates, and interactive maps"
 readme = "README.md"
 license = {text = "MIT"}
 authors = [
@@ -39,6 +39,7 @@ classifiers = [
 requires-python = ">=3.8"
 dependencies = [
     "networkx>=3.0",
+    "tomli>=2.0.0; python_version < '3.11'",
 ]
 
 [project.optional-dependencies]
@@ -71,6 +72,20 @@ Issues = "https://github.com/haider1998/PyVisualizer/issues"
 where = ["."]
 include = ["pyvisualizer*"]
 
+[tool.pyvisualizer]
+# Defaults used by `py-code-visualizer readme` / `check` in CI and pre-commit.
+exclude = ["tests", "examples"]
+max_nodes = 120
+target = "README.md"
+detail = "module"
+
+[tool.pyvisualizer.rules]
+# Example layering policy (enforced by `py-code-visualizer check`):
+# layers = ["cli", "api", "core", "visualizers", "serializers"]
+# forbid = ["core -> cli", "core -> visualizers"]
+layers = []
+forbid = []
+
 [tool.black]
 line-length = 100
 target-version = ['py38', 'py39', 'py310', 'py311', 'py312']
@@ -91,7 +106,7 @@ profile = "black"
 line_length = 100
 
 [tool.mypy]
-python_version = "3.8"
+python_version = "3.10"
 warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = true

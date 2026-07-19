@@ -1,9 +1,10 @@
 """PyVisualizer test configuration."""
 
-import pytest
-import tempfile
 import os
+import tempfile
 from pathlib import Path
+
+import pytest
 
 
 @pytest.fixture
@@ -22,7 +23,7 @@ def temp_output_dir():
 @pytest.fixture
 def simple_python_code():
     """Simple Python code for testing."""
-    return '''
+    return """
 class Calculator:
     def __init__(self):
         self.result = 0
@@ -44,7 +45,7 @@ def main():
 
 if __name__ == "__main__":
     main()
-'''
+"""
 
 
 @pytest.fixture
@@ -60,21 +61,21 @@ def temp_python_package(temp_output_dir, simple_python_code):
     """Create a temporary Python package for testing."""
     package_dir = temp_output_dir / "test_package"
     package_dir.mkdir()
-    
+
     # Create __init__.py
     (package_dir / "__init__.py").write_text("")
-    
+
     # Create main module
     (package_dir / "main.py").write_text(simple_python_code)
-    
+
     # Create another module
-    (package_dir / "utils.py").write_text('''
+    (package_dir / "utils.py").write_text("""
 def helper_function():
     return "helper"
 
 class UtilClass:
     def util_method(self):
         return helper_function()
-''')
-    
+""")
+
     return package_dir

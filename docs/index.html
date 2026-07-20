@@ -182,9 +182,9 @@
             <ul class="nav-menu" id="navMenu">
                 <li><a href="#features">Features</a></li>
                 <li><a href="#use-cases">Use cases</a></li>
-                <li><a href="#proof">Proof</a></li>
+                <li><a href="compare.html">Compare</a></li>
+                <li><a href="facts.html">Facts</a></li>
                 <li><a href="#installation">Install</a></li>
-                <li><a href="#comparison">Compare</a></li>
                 <li><a href="https://github.com/haider1998/pyvisualizer" target="_blank" rel="noopener"
                         class="nav-github">
                         <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
@@ -482,9 +482,9 @@ flowchart TD
                     <div class="step-content">
                         <h3>Generate Interactive HTML</h3>
                         <div class="code-block">
-                            <code>py-code-visualizer /path/to/project --format html -o architecture.html</code>
+                            <code>py-code-visualizer visualize . -o architecture.html</code>
                             <button class="copy-btn"
-                                data-copy="py-code-visualizer /path/to/project --format html -o architecture.html"
+                                data-copy="py-code-visualizer visualize . -o architecture.html"
                                 aria-label="Copy">
                                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                                     stroke-width="2">
@@ -498,11 +498,11 @@ flowchart TD
                 <div class="install-step animate-on-scroll">
                     <div class="step-number">3</div>
                     <div class="step-content">
-                        <h3>Or Generate Mermaid</h3>
+                        <h3>Or Self-Heal Your README</h3>
                         <div class="code-block">
-                            <code>py-code-visualizer /path/to/project --format mermaid -o architecture.mmd</code>
+                            <code>py-code-visualizer readme .</code>
                             <button class="copy-btn"
-                                data-copy="py-code-visualizer /path/to/project --format mermaid -o architecture.mmd"
+                                data-copy="py-code-visualizer readme ."
                                 aria-label="Copy">
                                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                                     stroke-width="2">
@@ -692,6 +692,51 @@ flowchart TD
         </div>
     </section>
 
+    <!-- Built for your stack (persona strip) -->
+    <section class="personas" id="personas">
+        <style>
+            .personas { padding: 3.5rem 0; }
+            .persona-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1.1rem; margin-top: 2rem; }
+            .persona-card { display: block; border: 1px solid rgba(128,128,128,.22); border-radius: 16px; padding: 1.5rem; text-decoration: none; color: inherit; transition: transform .15s ease, border-color .15s ease; }
+            .persona-card:hover { transform: translateY(-4px); border-color: var(--primary, #7c3aed); }
+            .persona-card .pic { font-size: 2rem; }
+            .persona-card h3 { margin: .6rem 0 .35rem; font-size: 1.12rem; }
+            .persona-card p { opacity: .82; margin: 0; line-height: 1.55; font-size: .93rem; }
+            .persona-card .go { margin-top: .8rem; font-weight: 600; color: var(--primary, #7c3aed); font-size: .9rem; }
+        </style>
+        <div class="container">
+            <div class="section-header animate-on-scroll">
+                <span class="section-badge">Built for your stack</span>
+                <h2 class="section-title">Whatever kind of Python you write</h2>
+                <p class="section-subtitle">Backend, API, or ML — the call graph is the same ground truth,
+                    shaped to how your project is actually laid out.</p>
+            </div>
+            <div class="persona-grid animate-on-scroll">
+                <a class="persona-card" href="for/django.html">
+                    <div class="pic">🌿</div>
+                    <h3>Django</h3>
+                    <p>See the real request flow — urls → views → services → models — not just the model schema
+                        <code>graph_models</code> draws.</p>
+                    <div class="go">Visualize a Django project →</div>
+                </a>
+                <a class="persona-card" href="for/fastapi.html">
+                    <div class="pic">⚡</div>
+                    <h3>FastAPI</h3>
+                    <p>Every route's blast radius through services and repos — async and decorators handled
+                        statically, cycles gated in CI.</p>
+                    <div class="go">Map a FastAPI service →</div>
+                </a>
+                <a class="persona-card" href="for/ml-pipelines.html">
+                    <div class="pic">🧪</div>
+                    <h3>ML pipelines</h3>
+                    <p>Map ingest → features → train → evaluate, and find the abandoned experiment code nothing
+                        calls anymore.</p>
+                    <div class="go">Untangle an ML codebase →</div>
+                </a>
+            </div>
+        </div>
+    </section>
+
     <!-- Proof / measured benchmarks -->
     <section class="proof" id="proof">
         <style>
@@ -732,6 +777,9 @@ flowchart TD
                 synthetic project (seed 1998). Speed is hardware-dependent — reproduce it yourself with
                 <code>python benchmarks/bench.py</code>, which writes <a href="benchmarks.json">benchmarks.json</a>.
                 Provenance, zero-network, and byte-determinism are <em>structural</em> guarantees, not benchmark luck.</p>
+            <div class="uc-all" style="text-align:center;margin-top:1.5rem">
+                <a href="facts.html" class="btn btn-secondary">All measured facts, with methodology →</a>
+            </div>
         </div>
     </section>
 

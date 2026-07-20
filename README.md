@@ -30,6 +30,16 @@ dependencies, and a fully offline interactive map. Because the output is
 pip install py-code-visualizer && py-code-visualizer visualize .
 ```
 
+**Who is this for?** Any Python developer, whatever your stack:
+[**Django**](https://haider1998.github.io/pyvisualizer/for/django.html) (real
+request flow, not just the model schema) ·
+[**FastAPI**](https://haider1998.github.io/pyvisualizer/for/fastapi.html) (every
+route's blast radius, async + decorators) ·
+[**ML pipelines**](https://haider1998.github.io/pyvisualizer/for/ml-pipelines.html)
+(map the pipeline, find dead experiments). See the
+[honest comparison](https://haider1998.github.io/pyvisualizer/compare.html) and
+[measured facts](https://haider1998.github.io/pyvisualizer/facts.html).
+
 ---
 
 ## Why this exists (and why an LLM can't do it)

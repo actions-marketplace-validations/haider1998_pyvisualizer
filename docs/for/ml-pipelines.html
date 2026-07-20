@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Visualize an ML Pipeline Codebase — Find the Dead Experiments</title>
+    <meta name="description"
+        content="How to map a machine-learning codebase: a deterministic call graph of ingest → features → train → evaluate, automatic detection of orphaned experiment code, and verified context packs for AI-assisted refactoring. No ML libraries needed for the analysis.">
+    <link rel="canonical" href="https://haider1998.github.io/pyvisualizer/for/ml-pipelines.html">
+    <link rel="stylesheet" href="../style.css">
+    <link rel="stylesheet" href="../use-cases/_uc.css">
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "HowTo",
+      "name": "Map an ML pipeline codebase with py-code-visualizer",
+      "description": "Visualize the real pipeline call graph, list orphaned experiment code with file:line, and build a verified context pack before asking an AI agent to refactor the training loop.",
+      "totalTime": "PT2M",
+      "tool": [{ "@type": "HowToTool", "name": "py-code-visualizer" }],
+      "step": [
+        { "@type": "HowToStep", "name": "Map the live pipeline", "text": "Run 'py-code-visualizer visualize <project> -o pipeline.html' for a self-contained interactive map of ingest → features → train → evaluate.", "url": "https://haider1998.github.io/pyvisualizer/for/ml-pipelines.html#map" },
+        { "@type": "HowToStep", "name": "Find the dead experiments", "text": "Run 'py-code-visualizer check <project> --dead-code' to list functions no live path reaches — the abandoned trainers and grid searches every ML repo accumulates.", "url": "https://haider1998.github.io/pyvisualizer/for/ml-pipelines.html#dead" },
+        { "@type": "HowToStep", "name": "Refactor with an AI agent, safely", "text": "Run 'py-code-visualizer context <project> --focus train_model' so the agent gets verified facts about the training loop's callers and callees instead of guessing.", "url": "https://haider1998.github.io/pyvisualizer/for/ml-pipelines.html#agent" }
+      ]
+    }
+    </script>
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "FAQPage",
+      "mainEntity": [
+        { "@type": "Question", "name": "Do I need my ML dependencies installed to analyze the codebase?", "acceptedAnswer": { "@type": "Answer", "text": "No. Analysis is pure AST parsing — nothing is imported or executed, so you don't need torch, sklearn, CUDA, or your data to map the code. That also means it's safe on any machine, including CI." } },
+        { "@type": "Question", "name": "Can it find abandoned experiment code in an ML repo?", "acceptedAnswer": { "@type": "Answer", "text": "Yes. 'check --dead-code' lists functions with no in-project callers that aren't entry points — typically old trainers and abandoned experiments — each with a file:line. It's deliberately conservative: a review list, not a delete list." } },
+        { "@type": "Question", "name": "Does it work on notebooks?", "acceptedAnswer": { "@type": "Answer", "text": "It analyzes .py files. The common workflow is to map the pipeline package that notebooks call into; anything that has been promoted from notebook to module is covered." } }
+      ]
+    }
+    </script>
+</head>
+<body>
+    <nav class="nav" id="nav">
+        <div class="nav-container">
+            <a href="../index.html" class="nav-logo">
+                <img src="../images/PyVizualizer_Logo.png" alt="py-code-visualizer" class="logo-img">
+            </a>
+            <ul class="nav-menu">
+                <li><a href="../use-cases/index.html" class="nav-link">Use cases</a></li>
+                <li><a href="../playground.html" class="nav-link">Playground</a></li>
+                <li><a href="https://github.com/haider1998/PyVisualizer" class="nav-github">GitHub</a></li>
+            </ul>
+        </div>
+    </nav>
+
+    <header class="uc-hero">
+        <div class="container">
+            <span class="section-badge">For ML engineers</span>
+            <h1>Map the pipeline. Find the dead experiments.</h1>
+            <p class="lead">Every ML repo has two codebases: the pipeline that actually runs, and the
+                graveyard of <code>train_v1_legacy</code>, <code>grid_search_old</code>, and
+                <code>_fit_experimental</code> that nothing calls anymore. A verified call graph
+                separates them in seconds — without importing torch, sklearn, or your data.</p>
+            <div class="uc-meta">
+                <span class="uc-tag">ingest → features → train → evaluate</span>
+                <span class="uc-tag">check --dead-code</span>
+                <span class="uc-tag">no ML libs needed</span>
+            </div>
+        </div>
+    </header>
+
+    <main class="uc-body container">
+        <p>Commands below run against an ML-shaped fixture in the repo
+            (<code>examples/scenarios/ml_pipeline</code> — a live
+            <code>run → ingest → features → train → evaluate</code> pipeline plus deliberately
+            orphaned experiment code). Output is verbatim.</p>
+
+        <div class="uc-step" id="map">
+            <span class="step-num">1</span><h3>See the pipeline that actually runs</h3>
+            <div class="uc-cmd"><span class="p">$</span> py-code-visualizer visualize examples/scenarios/ml_pipeline -o pipeline.html</div>
+            <div class="uc-out">Built graph with <span class="ok">16 functions and 13 calls</span>
+Interactive HTML visualization saved to pipeline.html</div>
+            <p>Canonical stats: 16 functions, 13 calls, 0 cycles, 0 ambiguous edges — in one
+                self-contained offline file. The map shows one clean spine from
+                <code>pipeline.run</code> through each stage — and an island of experiment functions
+                connected to nothing. That island is your cleanup backlog, made visible.</p>
+        </div>
+
+        <div class="uc-step" id="dead">
+            <span class="step-num">2</span><h3>List the graveyard, with proof</h3>
+            <div class="uc-cmd"><span class="p">$</span> py-code-visualizer check examples/scenarios/ml_pipeline --dead-code</div>
+            <div class="uc-out"><span class="ok">✅ Architecture check passed: no rule or cycle violations.</span>
+
+<span class="warn">🟡 2 function(s) with no in-project callers (review — may be public API):</span>
+    experiments.grid_search_abandoned
+    experiments.train_model_v1_legacy</div>
+            <p>Deliberately conservative: <code>_fit_legacy</code> is <em>not</em> listed even though
+                it's effectively dead, because the (dead) legacy trainer still calls it — the tool
+                reports what it can prove, and once you delete the trainer, the next run flags its
+                helper too. A review list you can trust, not a chainsaw.</p>
+        </div>
+
+        <div class="uc-step" id="agent">
+            <span class="step-num">3</span><h3>Refactor the training loop with an agent — safely</h3>
+            <p style="margin-top:1rem">"Refactor <code>train_model</code> to support checkpointing" is
+                a classic agent task. Give the agent verified facts about who calls it and what it
+                calls, instead of letting it guess from a repo dump:</p>
+            <div class="uc-cmd"><span class="p">$</span> py-code-visualizer context examples/scenarios/ml_pipeline --focus train_model</div>
+            <div class="uc-out"># Context Pack — ml_pipeline
+
+- Focus: `train.train_model`
+- Included functions: <b>13</b>
+
+## Verified calls (caller → callee · confidence · provenance)
+- `pipeline.run` → `train.train_model` · resolved · …/pipeline.py:12
+- `train.train_model` → `train._fit` · resolved · …/train.py:6
+- `train.train_model` → `train._hyperparams` · resolved · …/train.py:5
+  …</div>
+            <p>The agent knows — with provenance — that only <code>pipeline.run</code> depends on the
+                signature it's about to change. See the
+                <a href="../use-cases/agent-context.html">full agent-context walkthrough</a>.</p>
+        </div>
+
+        <div class="uc-benefit">
+            <p style="margin:0"><strong>What you got.</strong> The live pipeline mapped and separated
+                from the experiment graveyard (2 orphaned functions found here, each with a
+                <code>file:line</code>), zero dependencies installed, and verified context for
+                AI-assisted refactoring of the training loop. The mess every ML repo carries, finally
+                measurable.</p>
+        </div>
+
+        <p class="uc-note">Fixture: <code>examples/scenarios/ml_pipeline</code>. Output shown verbatim
+            except lists trimmed with … and repeated path prefixes shortened to <code>…/</code> for
+            width. Scales: a <a href="../facts.html">measured 98,669-line project maps in ~4.9 s</a>.</p>
+
+        <a href="../use-cases/index.html" class="uc-nav-back">← All use cases</a>
+    </main>
+
+    <footer class="footer">
+        <div class="container">
+            <p style="text-align:center;opacity:.7;padding:2rem 0">
+                Deterministic, AST-verified architecture ground truth ·
+                <a href="https://github.com/haider1998/PyVisualizer">py-code-visualizer</a> · MIT
+            </p>
+        </div>
+    </footer>
+    <script src="../script.js"></script>
+</body>
+</html>

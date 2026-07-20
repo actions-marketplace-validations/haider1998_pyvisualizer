@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FastAPI Call Graph — See Every Route's Real Blast Radius</title>
+    <meta name="description"
+        content="How to visualize a FastAPI service's architecture: a deterministic call graph from route handlers through services to repositories, async and decorators included — plus a CI gate for circular dependencies and a verified context pack for AI agents.">
+    <link rel="canonical" href="https://haider1998.github.io/pyvisualizer/for/fastapi.html">
+    <link rel="stylesheet" href="../style.css">
+    <link rel="stylesheet" href="../use-cases/_uc.css">
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "HowTo",
+      "name": "Map a FastAPI service's architecture with py-code-visualizer",
+      "description": "Measure a route handler's blast radius through services and repositories, gate circular dependencies in CI, and build a verified context pack for AI agents.",
+      "totalTime": "PT2M",
+      "tool": [{ "@type": "HowToTool", "name": "py-code-visualizer" }],
+      "step": [
+        { "@type": "HowToStep", "name": "Measure a route's blast radius", "text": "Run 'py-code-visualizer impact <handler-or-service> <project>' to see the exact callers and callees across app, services, and repos — async handlers and decorators included.", "url": "https://haider1998.github.io/pyvisualizer/for/fastapi.html#impact" },
+        { "@type": "HowToStep", "name": "Gate cycles in CI", "text": "Run 'py-code-visualizer check <project> --fail-on-cycles' — exits non-zero the moment a circular dependency appears.", "url": "https://haider1998.github.io/pyvisualizer/for/fastapi.html#gate" },
+        { "@type": "HowToStep", "name": "Feed your AI agent verified facts", "text": "Run 'py-code-visualizer context <project> --focus <function>' for a task-scoped, verified pack — signatures, call edges, and provenance, no guessing.", "url": "https://haider1998.github.io/pyvisualizer/for/fastapi.html#context" }
+      ]
+    }
+    </script>
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "FAQPage",
+      "mainEntity": [
+        { "@type": "Question", "name": "Does it understand async FastAPI handlers and decorators?", "acceptedAnswer": { "@type": "Answer", "text": "Yes. Async functions are collected and tagged, decorator names are recorded as metadata, and even decorator closures (e.g. wrap functions inside a route decorator) appear with correct qualified names like deps.get.<locals>.wrap — because collection is a real recursive AST visitor, not a regex." } },
+        { "@type": "Question", "name": "Does FastAPI need to be installed for the analysis?", "acceptedAnswer": { "@type": "Answer", "text": "No. Analysis is pure AST parsing — nothing is imported or executed. It maps any FastAPI-style codebase without its dependencies, which also makes it safe and fast in CI." } },
+        { "@type": "Question", "name": "Can it detect circular dependencies in a FastAPI service?", "acceptedAnswer": { "@type": "Answer", "text": "Yes, at the call-graph level (stricter than import linters). 'check --fail-on-cycles' exits non-zero on any cycle, and 'diff --fail-on-new-cycles' fails a PR that introduces one." } }
+      ]
+    }
+    </script>
+</head>
+<body>
+    <nav class="nav" id="nav">
+        <div class="nav-container">
+            <a href="../index.html" class="nav-logo">
+                <img src="../images/PyVizualizer_Logo.png" alt="py-code-visualizer" class="logo-img">
+            </a>
+            <ul class="nav-menu">
+                <li><a href="../use-cases/index.html" class="nav-link">Use cases</a></li>
+                <li><a href="../playground.html" class="nav-link">Playground</a></li>
+                <li><a href="https://github.com/haider1998/PyVisualizer" class="nav-github">GitHub</a></li>
+            </ul>
+        </div>
+    </nav>
+
+    <header class="uc-hero">
+        <div class="container">
+            <span class="section-badge">For API developers</span>
+            <h1>Your FastAPI service, as a verified call graph</h1>
+            <p class="lead">A request hits <code>POST /orders</code>. What does it <em>actually</em>
+                execute — through which services, into which repositories? Grep can't answer
+                transitively. The AST can, with a <code>file:line</code> on every hop, async and
+                decorators included.</p>
+            <div class="uc-meta">
+                <span class="uc-tag">routes → services → repos</span>
+                <span class="uc-tag">async + decorators</span>
+                <span class="uc-tag">check --fail-on-cycles</span>
+            </div>
+        </div>
+    </header>
+
+    <main class="uc-body container">
+        <p>Commands below run against a FastAPI-shaped fixture in the repo
+            (<code>examples/scenarios/fastapi_svc</code> — decorated async handlers → services →
+            repositories, in plain Python since pure AST analysis needs no framework installed).
+            Output is verbatim.</p>
+
+        <div class="uc-step" id="impact">
+            <span class="step-num">1</span><h3>The blast radius of the order flow</h3>
+            <div class="uc-cmd"><span class="p">$</span> py-code-visualizer impact place examples/scenarios/fastapi_svc</div>
+            <div class="uc-out">Impact analysis for: services.OrderFlow.place
+<span class="warn">⚠️ Touching `place` affects **1** transitive caller(s) across **3** module(s).</span>
+
+Direct callers (1):
+    ← app.create_order
+Direct callees (3):
+    → repos.InventoryRepo.reserve
+    → repos.OrderRepo.insert
+    → services.OrderFlow._audit
+Modules affected: app, repos, services</div>
+            <p>One glance: change <code>place()</code> and you touch the <code>POST /orders</code>
+                handler above you and two repositories below you. For a handler itself, the same
+                command shows its full downstream execution path — the thing new teammates spend days
+                reconstructing by hand.</p>
+        </div>
+
+        <div class="uc-step" id="gate">
+            <span class="step-num">2</span><h3>Never ship a dependency cycle</h3>
+            <p style="margin-top:1rem">Service ↔ repo cycles creep into API codebases quietly.
+                Gate them at the <em>call-graph</em> level — stricter than an import linter, because a
+                call edge is a real runtime dependency.</p>
+            <div class="uc-cmd"><span class="p">$</span> py-code-visualizer check examples/scenarios/fastapi_svc --fail-on-cycles</div>
+            <div class="uc-out"><span class="ok">✅ Architecture check passed: no rule or cycle violations.</span>
+$ echo $?
+<span class="ok">0</span>   # clean — and it exits 1 the day a cycle appears</div>
+        </div>
+
+        <div class="uc-step" id="context">
+            <span class="step-num">3</span><h3>Hand your AI agent the verified slice</h3>
+            <p style="margin-top:1rem">Asking an agent to modify the order flow? Give it facts, not a
+                repo dump. Note the closures — <code>deps.post.&lt;locals&gt;.wrap</code> — collected
+                with correct qualified names, because this is a real AST visitor, not a regex.</p>
+            <div class="uc-cmd"><span class="p">$</span> py-code-visualizer context examples/scenarios/fastapi_svc --focus OrderFlow.place</div>
+            <div class="uc-out"># Context Pack — fastapi_svc
+
+- Focus: `services.OrderFlow.place`
+- Included functions: <b>18</b>
+
+## Functions
+- `app.create_order(payload)` — examples/scenarios/fastapi_svc/app.py:13
+- `deps.post.&lt;locals&gt;.wrap(fn)` — examples/scenarios/fastapi_svc/deps.py:12
+- `repos.InventoryRepo.reserve(self, sku)` — examples/scenarios/fastapi_svc/repos.py:22
+  …
+
+## Verified calls (caller → callee · confidence · provenance)
+- `app.create_order` → `services.OrderFlow.place` · resolved · …/app.py:15
+- `services.OrderFlow.place` → `repos.InventoryRepo.reserve` · resolved · …/services.py:17
+- `services.OrderFlow.place` → `repos.OrderRepo.insert` · resolved · …/services.py:18
+  …</div>
+            <p>Every fact carries provenance; ambiguous calls would be flagged, never guessed. See the
+                full <a href="../use-cases/agent-context.html">agent-context walkthrough</a> — on a
+                100k-line project the pack is <a href="../facts.html">~96% smaller</a> than feeding
+                the source.</p>
+        </div>
+
+        <div class="uc-benefit">
+            <p style="margin:0"><strong>What you got.</strong> Route-to-repository visibility with
+                provenance on every edge, a cycle gate that runs in CI without installing your app's
+                dependencies, and task-scoped verified context for the AI tools already editing your
+                service. Async, decorators, and closures handled correctly — statically.</p>
+        </div>
+
+        <p class="uc-note">Fixture: <code>examples/scenarios/fastapi_svc</code>. Output shown verbatim
+            except lists trimmed with … and repeated path prefixes shortened to <code>…/</code> for
+            width (run it to see all 18 functions with full paths and GitHub links).</p>
+
+        <a href="../use-cases/index.html" class="uc-nav-back">← All use cases</a>
+    </main>
+
+    <footer class="footer">
+        <div class="container">
+            <p style="text-align:center;opacity:.7;padding:2rem 0">
+                Deterministic, AST-verified architecture ground truth ·
+                <a href="https://github.com/haider1998/PyVisualizer">py-code-visualizer</a> · MIT
+            </p>
+        </div>
+    </footer>
+    <script src="../script.js"></script>
+</body>
+</html>

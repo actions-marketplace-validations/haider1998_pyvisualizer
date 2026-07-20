@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>py-code-visualizer vs pyan vs code2flow vs pydeps vs pycallgraph — Honest Comparison</title>
+    <meta name="description"
+        content="A documented-features comparison of Python code visualization tools: py-code-visualizer, pyan, code2flow, pydeps, and pycallgraph2 — analysis type, accuracy stance, outputs, CI gates, and when each tool is the better choice.">
+    <link rel="canonical" href="https://haider1998.github.io/pyvisualizer/compare.html">
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="use-cases/_uc.css">
+    <style>
+        .cmp-wrap { overflow-x: auto; margin: 2rem 0; }
+        table.cmp { border-collapse: collapse; width: 100%; min-width: 760px; font-size: .92rem; }
+        .cmp th, .cmp td { border: 1px solid rgba(128,128,128,.25); padding: .6rem .8rem; text-align: left; vertical-align: top; }
+        .cmp th { background: rgba(124,58,237,.08); }
+        .cmp td.y { color: #3fb950; font-weight: 600; }
+        .cmp td.n { opacity: .45; }
+        .cmp tr td:first-child { font-weight: 600; }
+    </style>
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "ItemList",
+      "name": "Python code visualization tools compared",
+      "itemListElement": [
+        { "@type": "ListItem", "position": 1, "name": "py-code-visualizer", "url": "https://github.com/haider1998/PyVisualizer" },
+        { "@type": "ListItem", "position": 2, "name": "pyan", "url": "https://github.com/Technologicat/pyan" },
+        { "@type": "ListItem", "position": 3, "name": "code2flow", "url": "https://github.com/scottrogowski/code2flow" },
+        { "@type": "ListItem", "position": 4, "name": "pydeps", "url": "https://github.com/thebjorn/pydeps" },
+        { "@type": "ListItem", "position": 5, "name": "pycallgraph2", "url": "https://pypi.org/project/pycallgraph2/" }
+      ]
+    }
+    </script>
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "FAQPage",
+      "mainEntity": [
+        { "@type": "Question", "name": "What is the difference between py-code-visualizer and pydeps?", "acceptedAnswer": { "@type": "Answer", "text": "pydeps visualizes module import dependencies — which modules import which. py-code-visualizer builds a function-level call graph — which functions actually call which, with file:line provenance and confidence tags — plus CI gates, PR review reports, and AI-agent exports. Use pydeps for a quick import overview; use py-code-visualizer when you need call-level behavior, gates, or verified agent context." } },
+        { "@type": "Question", "name": "What is the difference between py-code-visualizer and code2flow?", "acceptedAnswer": { "@type": "Answer", "text": "Both are static AST analyzers. code2flow supports multiple dynamic languages (Python, JavaScript, Ruby, PHP) and describes its output as a 'pretty good estimate', noting that no algorithm can generate a perfect call graph for a dynamic language. py-code-visualizer is Python-only and takes the opposite stance on the same problem: it emits only edges it can resolve, tags unresolvable calls as ambiguous with candidates preserved, guarantees byte-identical deterministic output, and attaches file:line provenance to every edge — which is what makes it usable in CI gates and as AI-agent ground truth." } },
+        { "@type": "Question", "name": "What is the difference between static call graphs and pycallgraph-style tracing?", "acceptedAnswer": { "@type": "Answer", "text": "pycallgraph2 records the calls that actually happen while your program runs — it executes your code and traces it. Static tools like py-code-visualizer parse the source without running it, covering all code paths (not just the ones a given run exercised) and staying safe for untrusted code and air-gapped CI. Use runtime tracing to profile a specific execution; use static analysis to map the whole codebase." } }
+      ]
+    }
+    </script>
+</head>
+<body>
+    <nav class="nav" id="nav">
+        <div class="nav-container">
+            <a href="index.html" class="nav-logo">
+                <img src="images/PyVizualizer_Logo.png" alt="py-code-visualizer" class="logo-img">
+            </a>
+            <ul class="nav-menu">
+                <li><a href="use-cases/index.html" class="nav-link">Use cases</a></li>
+                <li><a href="playground.html" class="nav-link">Playground</a></li>
+                <li><a href="https://github.com/haider1998/PyVisualizer" class="nav-github">GitHub</a></li>
+            </ul>
+        </div>
+    </nav>
+
+    <header class="uc-hero">
+        <div class="container">
+            <span class="section-badge">Comparison</span>
+            <h1>Python code visualization tools, honestly compared</h1>
+            <p class="lead">Documented features only — every competitor claim below comes from that
+                tool's own README or docs (linked). And where another tool is the better choice, we
+                say so.</p>
+        </div>
+    </header>
+
+    <main class="uc-body container">
+        <div class="cmp-wrap">
+        <table class="cmp">
+            <tr>
+                <th></th>
+                <th><a href="https://github.com/haider1998/PyVisualizer">py-code-visualizer</a></th>
+                <th><a href="https://github.com/Technologicat/pyan">pyan</a></th>
+                <th><a href="https://github.com/scottrogowski/code2flow">code2flow</a></th>
+                <th><a href="https://github.com/thebjorn/pydeps">pydeps</a></th>
+                <th><a href="https://pypi.org/project/pycallgraph2/">pycallgraph2</a></th>
+            </tr>
+            <tr>
+                <td>Analysis type</td>
+                <td class="y">Static (pure AST)</td>
+                <td>Static (AST)</td>
+                <td>Static (AST)</td>
+                <td>Static (imports)</td>
+                <td>Runtime tracing</td>
+            </tr>
+            <tr>
+                <td>Executes your code</td>
+                <td class="y">Never</td>
+                <td>No</td>
+                <td>No</td>
+                <td>No</td>
+                <td><strong>Yes</strong> (traces a run)</td>
+            </tr>
+            <tr>
+                <td>Graph level</td>
+                <td class="y">Function-level calls</td>
+                <td>Function-level calls + uses</td>
+                <td>Function-level calls</td>
+                <td>Module imports</td>
+                <td>Function calls (of one run)</td>
+            </tr>
+            <tr>
+                <td>Languages</td>
+                <td>Python</td>
+                <td>Python</td>
+                <td>Python, JS, Ruby, PHP</td>
+                <td>Python</td>
+                <td>Python</td>
+            </tr>
+            <tr>
+                <td>Accuracy stance</td>
+                <td class="y">Unresolvable calls flagged <em>ambiguous</em> with candidates — never guessed</td>
+                <td class="n">—</td>
+                <td>Self-described “pretty good estimate”</td>
+                <td class="n">— (imports are exact)</td>
+                <td>Exact for the traced run only</td>
+            </tr>
+            <tr>
+                <td>file:line provenance on every edge</td>
+                <td class="y">Yes</td>
+                <td class="n">—</td>
+                <td class="n">—</td>
+                <td class="n">—</td>
+                <td class="n">—</td>
+            </tr>
+            <tr>
+                <td>Deterministic (byte-identical) output guarantee</td>
+                <td class="y">Yes (tested)</td>
+                <td class="n">—</td>
+                <td class="n">—</td>
+                <td class="n">—</td>
+                <td class="n">— (run-dependent)</td>
+            </tr>
+            <tr>
+                <td>Outputs</td>
+                <td class="y">Interactive offline HTML · Mermaid · JSON · C4 · SVG/PNG</td>
+                <td>GraphViz dot · yEd · HTML</td>
+                <td>DOT / images</td>
+                <td>SVG (via GraphViz)</td>
+                <td>Images (via GraphViz)</td>
+            </tr>
+            <tr>
+                <td>CI gates (cycles, layer rules) &amp; PR diff reports</td>
+                <td class="y">Yes (`check`, `diff`, `review`)</td>
+                <td class="n">—</td>
+                <td class="n">—</td>
+                <td class="n">—</td>
+                <td class="n">—</td>
+            </tr>
+            <tr>
+                <td>AI/agent export (verified context packs, AGENTS.md)</td>
+                <td class="y">Yes (`context`, `export --for-ai`)</td>
+                <td class="n">—</td>
+                <td class="n">—</td>
+                <td class="n">—</td>
+                <td class="n">—</td>
+            </tr>
+        </table>
+        </div>
+        <p style="font-size:.85rem;opacity:.7">“—” = not a documented feature per that tool’s own
+            README/docs as of July 2026 (links in the header row). Corrections welcome —
+            <a href="https://github.com/haider1998/PyVisualizer/issues">open an issue</a>.</p>
+
+        <h2>When the other tool is the better choice</h2>
+        <ul>
+            <li><strong>pydeps</strong> — you want a fast, mature <em>module import</em> overview and
+                nothing more. Import graphs are exact by nature; if that's the whole question, pydeps
+                answers it well.</li>
+            <li><strong>pycallgraph2</strong> — you need to know what a <em>specific execution</em>
+                actually did (including timing), and you're able to run the code. Runtime tracing
+                answers a question static analysis can't.</li>
+            <li><strong>code2flow</strong> — your repo mixes Python with JavaScript, Ruby, or PHP and
+                you want one polyglot estimate across all of it.</li>
+            <li><strong>pyan</strong> — you want a minimal dot/yEd emitter to feed an existing
+                GraphViz pipeline.</li>
+        </ul>
+
+        <h2>Where py-code-visualizer is different by design</h2>
+        <p>The dynamic-language call-graph problem is real — code2flow's README says it plainly:
+            <em>“No algorithm can generate a perfect call graph for a dynamic language.”</em> We agree,
+            and take the opposite engineering stance on what to do about it: <strong>emit only what is
+            provable, and flag the rest</strong>. Unresolvable calls become <code>ambiguous</code>
+            edges with their full candidate list — never a guess. Add byte-identical determinism and
+            <code>file:line</code> provenance, and the graph stops being a picture and becomes
+            infrastructure: something you can gate CI on, diff in PRs, and hand to an AI agent as
+            ground truth. See the <a href="facts.html">measured facts</a>.</p>
+
+        <a href="use-cases/index.html" class="uc-nav-back">← All use cases</a>
+    </main>
+
+    <footer class="footer">
+        <div class="container">
+            <p style="text-align:center;opacity:.7;padding:2rem 0">
+                Deterministic, AST-verified architecture ground truth ·
+                <a href="https://github.com/haider1998/PyVisualizer">py-code-visualizer</a> · MIT
+            </p>
+        </div>
+    </footer>
+    <script src="script.js"></script>
+</body>
+</html>

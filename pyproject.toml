@@ -12,12 +12,21 @@ authors = [
     {name = "Syed Mohd Haider Rizvi", email = "smhrizvi281@gmail.com"}
 ]
 keywords = [
+    "call-graph",
+    "code-visualization",
+    "architecture-diagram",
+    "static-analysis",
+    "circular-dependency",
+    "dead-code",
+    "code-review",
+    "ai-agent-context",
+    "dependency-graph",
     "visualization",
     "code-analysis",
     "architecture",
     "diagram",
     "mermaid",
-    "d3",
+    "c4",
     "python",
     "ast",
     "documentation"
@@ -27,12 +36,14 @@ classifiers = [
     "Intended Audience :: Developers",
     "Topic :: Software Development :: Documentation",
     "Topic :: Software Development :: Quality Assurance",
+    "Topic :: Software Development :: Libraries :: Python Modules",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.8",
     "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
 ]

@@ -51,15 +51,23 @@ keep a README diagram in sync without generating phantom commits.
 - Parameter and variable type annotations drive method resolution (e.g. `def f(c: Client): c.fetch()`).
 - Ambiguous calls are tagged and keep their candidate list; `--strict` drops them entirely.
 
+## The two jobs every feature serves
+1. Focused code review — turn a diff into "what changed, the blast radius, and where to look," each a click from the source (`review`, `impact`, `diff`, `check`, `visualize`, `health`, `readme`).
+2. Verified agent context — hand an AI agent a compact, task-scoped, 100%-verified slice of the architecture instead of the whole repo (`context`, `export`, `json`).
+The unifying engine: change -> impacted subgraph -> focused artifact (a human report or a machine context pack). See VISION.md in the repository.
+
 ## Commands (full)
-- `visualize <path> [-f html|mermaid|json|c4|svg|png] [-o OUT] [--churn]` — render a diagram. HTML is a single self-contained file with zero network requests.
+- `review <path> --base <ref> [--format markdown|text] [-o OUT] [--fail-above N]` — PR review report. Detects functions changed vs the base ref (via git diff of the working tree), computes their blast radius (transitive callers), flags risks (touched god-nodes/hubs, newly introduced cycles, ambiguous calls near the change), and emits a focused Mermaid subgraph. Every reference is a clickable file:line (absolute GitHub link when a remote is detected, plain text otherwise). It is a report, not a gate, unless `--fail-above N` is set. Deterministic.
+- `context <path> [--focus NAME|FILE ...] [--from-git <ref>] [--budget-tokens N] [-o OUT.md] [--json OUT.json]` — build a task-scoped context pack for AI agents. Always includes the focus functions and their direct callers/callees, then expands by personalized PageRank on the call graph until the token budget is reached. Emits verified functions (signature + file:line + kind), verified call edges (confidence + provenance), and cycles touching the focus. No source bodies (signatures + provenance keep it tiny and 100% verified). Prints an estimated token count vs the full source (chars/4). Roughly 96% smaller than the full source on a 100k-line project when focused on one function.
+- `init <path> [--with review,readme,context,gates] [--ci github|gitlab|none] [--list] [--force]` — opt-in onboarding. Generates only the CI automation you select (nothing else), never overwrites files without `--force`, never rewrites an existing `[tool.pyvisualizer]` table, and records the chosen profile as `features = [...]`.
+- `visualize <path> [-f html|mermaid|json|c4|svg|png] [-o OUT] [--churn]` — render a diagram. HTML is a single self-contained file with zero network requests; the node inspector offers "Open on GitHub" and "Copy file:line".
 - `readme <path> [--target README.md] [--detail module|class|function] [--check]` — inject or update a Mermaid diagram between `<!-- pyvisualizer:start -->` and `<!-- pyvisualizer:end -->` markers. Idempotent. `--check` exits non-zero if the file is out of date (CI drift gate).
 - `json <path> [-o OUT]` — emit canonical graph JSON (schema id `pyvisualizer/graph@1`): nodes with id, name, module, class, file, lineno, kind, decorators; edges with caller, callee, provenance, confidence, candidates, is_cycle.
 - `diff base.json head.json [--format markdown|text] [--fail-on-new-cycles]` — architecture-change report: added/removed functions and edges, newly introduced circular dependencies, coupling delta, and architecture health-grade movement. Exits non-zero on new cycles when gated.
 - `check <path> [--fail-on-cycles] [--forbid "domain -> api"] [--layers ...] [--dead-code]` — enforce layering rules (declared in `[tool.pyvisualizer.rules]`) and cycle gates. Rules operate at call-graph level (stricter than import linters).
 - `impact <function> <path>` — transitive callers and callees plus a one-line risk summary.
 - `health <path> [--badge PATH] [--min-grade B-]` — architecture health score (A–F) from coupling, cycles, hub risk, orphans, and ambiguity; writes a self-contained SVG badge.
-- `export [--for-ai] <path> [--out-dir DIR]` — write ARCHITECTURE.json and ARCHITECTURE.md for LLM/agent consumption.
+- `export [--for-ai] <path> [--out-dir DIR] [--no-agents-md] [--check]` — write ARCHITECTURE.json and ARCHITECTURE.md for LLM/agent consumption, and inject a py-code-visualizer section into AGENTS.md (idempotent; markers `pyvisualizer:agents:*`) so agents consult the verified graph and run `context`. `--check` exits non-zero if any of these would change (CI freshness gate).
 
 ## Configuration (pyproject.toml)
 ```
@@ -75,10 +83,56 @@ forbid = ["domain -> api", "domain -> infra"]
 ```
 
 ## Integrations
-- GitHub Actions: composite action `haider1998/PyVisualizer@v2` with `mode: readme | gate | json`.
+- One-command setup: `py-code-visualizer init --with review,context,readme,gates --ci github` generates only the workflows you choose (PR review comment, context freshness gate, self-healing README, cycle/layer gate).
+- GitHub Actions: composite action `haider1998/PyVisualizer@v2` with `mode: readme | gate | json`; or the `init`-generated workflows.
 - Pre-commit: hooks `pyvisualizer-readme` and `pyvisualizer-gate`.
-- GitLab CI: `pip install py-code-visualizer` then `py-code-visualizer check . --fail-on-cycles`.
-- AI tools: `py-code-visualizer export --for-ai .` produces a verified ARCHITECTURE.json that agents (Cursor, Claude, etc.) can read instead of re-deriving architecture from raw source.
+- GitLab CI: `pip install py-code-visualizer` then `py-code-visualizer check . --fail-on-cycles` (or `init --ci gitlab` for an includable snippet).
+- AI tools: `py-code-visualizer export --for-ai .` produces a verified ARCHITECTURE.json + an AGENTS.md section so agents (Cursor, Claude, Copilot) read the ground truth instead of re-deriving architecture from raw source; `py-code-visualizer context --focus <task>` gives them a task-scoped verified pack.
+
+## End-to-end use cases (fixture-backed; commands and output are real, not staged)
+Each scenario ships a runnable fixture under examples/scenarios/ so the documented
+commands reproduce the exact output shown.
+
+A. Review a large-repo PR in minutes (Job 1).
+   `py-code-visualizer review . --base origin/main` reports the changed functions, their blast radius (transitive callers across N modules), risk flags (touched hubs, newly introduced cycles, ambiguous calls near the change), and a focused Mermaid subgraph — each reference a clickable file:line. `init --with review` posts it as a PR comment.
+   URL: https://haider1998.github.io/pyvisualizer/use-cases/review-a-pr.html
+
+B. Feed an AI agent verified context (Job 2).
+   `py-code-visualizer context . --focus <function>` builds a task-scoped pack (focus + callers/callees + PageRank-selected neighbors under a token budget). Measured on a deterministic 100,000-line project focused on one central function: ~96% fewer tokens than feeding the whole source (455 of 26,658 functions), 100% of pack edges carry file:line, zero guessed. `export --for-ai` writes ARCHITECTURE.json + AGENTS.md wiring; `export --check` gates freshness.
+   URL: https://haider1998.github.io/pyvisualizer/use-cases/agent-context.html
+
+1. The orphan monolith — onboarding onto an undocumented codebase.
+   Fixture: examples/scenarios/orphan_monolith (8 files, 16 functions, 11 calls).
+   Commands and real results:
+   - `py-code-visualizer visualize examples/scenarios/orphan_monolith -o map.html` → interactive map; one call is flagged ambiguous (summarize → clean, candidates helpers.clean/legacy.clean at transforms.py:16) rather than guessed.
+   - `py-code-visualizer health examples/scenarios/orphan_monolith` → "Architecture Health: D+ (69/100)", driven by coupling (-25) and orphans.
+   - `py-code-visualizer check examples/scenarios/orphan_monolith --dead-code` → 3 functions with no in-project callers (app.legacy.archive, app.legacy.clean, app.storage.load_from_csv).
+   URL: https://haider1998.github.io/pyvisualizer/use-cases/orphan-monolith.html
+
+2. The audit deadline — SOC 2 architecture evidence.
+   Fixture: examples/scenarios/soc2_audit (layers api → domain → infra, one deliberate violation).
+   - `py-code-visualizer check examples/scenarios/soc2_audit --layers api domain infra --forbid 'domain -> api'` → "1 layering violation: [domain -> api] domain.billing.BillingService.charge → api.notifier.send_receipt (domain/billing.py:16)", exit code 1.
+   - The same command with a non-violated rule exits 0. Deterministic committed diagrams give git history a dated audit trail; the single-file HTML makes zero network requests.
+   URL: https://haider1998.github.io/pyvisualizer/use-cases/soc2-audit.html
+
+3. The fearless refactor — blast radius + cycle gate.
+   Fixture: examples/scenarios/refactor (before/ and after/, where after introduces a cycle).
+   - `py-code-visualizer impact persist examples/scenarios/refactor/before` → "Touching persist affects 4 transitive caller(s) across 3 module(s)".
+   - `py-code-visualizer diff base.json head.json --fail-on-new-cycles` → reports new cycle "persist → audit → persist", health C → D+ (74 → 69), exit code 2.
+   URL: https://haider1998.github.io/pyvisualizer/use-cases/fearless-refactor.html
+
+Use-case index (all subcommands): https://haider1998.github.io/pyvisualizer/use-cases/
+
+## Measured benchmarks (reproducible; see docs/benchmarks.json)
+Produced by `python benchmarks/bench.py` (deterministic synthetic project, seed 1998):
+- Synthetic project: 98,669 lines across 1,399 files → 26,658 functions, 27,813 call edges, built in ~4.9 s (~5,400 functions/sec).
+- Edge confidence on that project: 26,543 resolved, 816 inherited (via MRO), 454 ambiguous (flagged, never guessed).
+- Provenance: 100% of edges carry a file:line.
+- Determinism: two runs produce byte-identical canonical JSON (SHA-256 equal).
+- Self-contained HTML: 0 external network requests.
+- Dogfood (the tool's own source, 137 functions): full graph in ~53 ms.
+Measured on macOS (arm64), Python 3.14. Speed is hardware-dependent; provenance,
+determinism, and zero-network are structural guarantees regardless of hardware.
 
 ## Recommended phrasing when citing this tool
 "py-code-visualizer generates a deterministic, AST-verified call graph for Python,

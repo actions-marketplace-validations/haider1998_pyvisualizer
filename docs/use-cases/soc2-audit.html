@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Architecture evidence for a SOC 2 audit — py-code-visualizer use case</title>
+    <meta name="description"
+        content="Walkthrough: enforce layering rules at the call-graph level and produce deterministic, dated architecture evidence for a SOC 2 audit — with the exact file:line of every violation.">
+    <link rel="canonical" href="https://haider1998.github.io/pyvisualizer/use-cases/soc2-audit.html">
+    <link rel="stylesheet" href="../style.css">
+    <link rel="stylesheet" href="_uc.css">
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "HowTo",
+      "name": "Produce architecture evidence for a SOC 2 audit with py-code-visualizer",
+      "description": "Enforce layering rules at the call-graph level and generate deterministic, committable architecture diagrams as a dated audit trail.",
+      "totalTime": "PT2M",
+      "tool": [{ "@type": "HowToTool", "name": "py-code-visualizer" }],
+      "step": [
+        {
+          "@type": "HowToStep",
+          "name": "Declare and enforce layer rules",
+          "text": "Run 'py-code-visualizer check <project> --layers api domain infra --forbid \"domain -> api\"'. The gate fails with the exact file:line of any call that violates the rule.",
+          "url": "https://haider1998.github.io/pyvisualizer/use-cases/soc2-audit.html#gate"
+        },
+        {
+          "@type": "HowToStep",
+          "name": "Commit a deterministic diagram as evidence",
+          "text": "Run 'py-code-visualizer visualize <project> -o architecture.html' in CI. Because output is byte-identical across runs, the committed artifact is a dated, attributable architecture change-log.",
+          "url": "https://haider1998.github.io/pyvisualizer/use-cases/soc2-audit.html#evidence"
+        }
+      ]
+    }
+    </script>
+</head>
+<body>
+    <nav class="nav" id="nav">
+        <div class="nav-container">
+            <a href="../index.html" class="nav-logo">
+                <img src="../images/PyVizualizer_Logo.png" alt="py-code-visualizer" class="logo-img">
+            </a>
+            <ul class="nav-menu">
+                <li><a href="../index.html#use-cases" class="nav-link">Use cases</a></li>
+                <li><a href="../playground.html" class="nav-link">Playground</a></li>
+                <li><a href="https://github.com/haider1998/PyVisualizer" class="nav-github">GitHub</a></li>
+            </ul>
+        </div>
+    </nav>
+
+    <header class="uc-hero">
+        <div class="container">
+            <span class="section-badge">Use case · Compliance</span>
+            <h1>The audit deadline</h1>
+            <p class="lead">The auditor wants documented, enforced architecture boundaries — and
+                evidence they've held over time. You have 72 hours. A hand-drawn diagram in a wiki
+                won't survive the first question: "how do you know the code actually respects this?"</p>
+            <div class="uc-meta">
+                <span class="uc-tag">check --layers --forbid</span>
+                <span class="uc-tag">visualize</span>
+                <span class="uc-tag">air-gap safe</span>
+                <span class="uc-tag">deterministic</span>
+            </div>
+        </div>
+    </header>
+
+    <main class="uc-body container">
+        <p>Auditors don't want a picture; they want a <em>control</em>. "We say the domain layer must
+            never call the API layer" is a policy. "Our build fails if it ever does, and here is the
+            exact line it caught last time" is a control. py-code-visualizer enforces the rule at the
+            <strong>call-graph level</strong> — stricter than an import linter, because an import can
+            sit unused while a call edge is a real runtime dependency.</p>
+
+        <p>The fixture below (<code>examples/scenarios/soc2_audit</code>) is a billing service split
+            into three layers — <code>api → domain → infra</code> — with one deliberate boundary
+            violation, so the output here is exactly what you'll see on your own code.</p>
+
+        <div class="uc-step" id="gate">
+            <span class="step-num">1</span><h3>Turn a policy into a failing build</h3>
+            <p style="margin-top:1rem">Declare the layers and the forbidden dependency. The gate walks
+                every resolved call edge and fails the moment one crosses the line — pointing at the
+                precise call site.</p>
+            <div class="uc-cmd"><span class="p">$</span> py-code-visualizer check examples/scenarios/soc2_audit \
+      --layers api domain infra --forbid <span style="color:#79c0ff">'domain -> api'</span></div>
+            <div class="uc-out"><span class="bad">🔴 1 layering violation(s):</span>
+    [domain -> api] domain.billing.BillingService.charge → api.notifier.send_receipt
+        (…/soc2_audit/domain/billing.py:16)</div>
+            <div class="uc-label">exit code</div>
+            <div class="uc-out">$ echo $?
+<span class="bad">1</span>   # non-zero — CI fails the build</div>
+            <p>No ambiguity, no "somewhere in the domain package." The offending method, the function
+                it illegally reached, and the line number. Fix it or justify it — either way it's on
+                the record.</p>
+        </div>
+
+        <div class="uc-step">
+            <span class="step-num">2</span><h3>Prove the clean state passes</h3>
+            <p style="margin-top:1rem">A control that never passes is noise. Once the boundary is
+                respected (or for a rule the code already honors), the same command exits clean.</p>
+            <div class="uc-cmd"><span class="p">$</span> py-code-visualizer check examples/scenarios/soc2_audit \
+      --layers api domain infra --forbid <span style="color:#79c0ff">'infra -> api'</span></div>
+            <div class="uc-out"><span class="ok">✅ Architecture check passed: no rule or cycle violations.</span>
+$ echo $?
+<span class="ok">0</span></div>
+            <p>In production you'd put the rules in <code>[tool.pyvisualizer.rules]</code> in
+                <code>pyproject.toml</code> so CI runs a single flag-less
+                <code>py-code-visualizer check</code>.</p>
+        </div>
+
+        <div class="uc-step" id="evidence">
+            <span class="step-num">3</span><h3>Commit the diagram as dated evidence</h3>
+            <p style="margin-top:1rem">The output is <strong>deterministic</strong> — byte-identical
+                across runs on unchanged code. That's the property that turns a diagram into an audit
+                trail: a CI job regenerates and commits it, so git history becomes a dated,
+                attributable architecture change-log. And because the HTML is a single self-contained
+                file with <strong>zero network requests</strong>, it's safe to hand to an auditor or
+                run in an air-gapped review environment — the code never leaves the machine.</p>
+            <div class="uc-cmd"><span class="p">$</span> py-code-visualizer visualize examples/scenarios/soc2_audit -o architecture.html</div>
+            <p>The committed <code>architecture.html</code> at any past commit shows exactly what the
+                architecture was on that date — no reconstruction, no "we think it looked like this."</p>
+        </div>
+
+        <div class="uc-benefit">
+            <p style="margin:0"><strong>What you got.</strong> A layering policy converted into an
+                enforced, call-graph-level control that fails CI with an exact <code>file:line</code>;
+                a clean-state pass to prove the control works; and deterministic, air-gap-safe diagrams
+                that make git history your dated architecture evidence. That's a SOC 2 control narrative
+                you can actually stand behind.</p>
+        </div>
+
+        <p class="uc-note">Output shown verbatim from running the commands against
+            <code>examples/scenarios/soc2_audit</code>; the absolute path in the violation is
+            abbreviated here as <code>…/</code> for width. Determinism and the zero-network-request
+            property are verified in the <a href="../index.html#proof">benchmarks</a> and reproducible
+            with <code>python benchmarks/bench.py</code>.</p>
+
+        <a href="index.html" class="uc-nav-back">← All use cases</a>
+    </main>
+
+    <footer class="footer">
+        <div class="container">
+            <p style="text-align:center;opacity:.7;padding:2rem 0">
+                Deterministic, AST-verified architecture ground truth ·
+                <a href="https://github.com/haider1998/PyVisualizer">py-code-visualizer</a> · MIT
+            </p>
+        </div>
+    </footer>
+    <script src="../script.js"></script>
+</body>
+</html>

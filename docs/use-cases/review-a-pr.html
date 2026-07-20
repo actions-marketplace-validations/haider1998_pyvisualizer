@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Review a large-repo PR in minutes — py-code-visualizer use case</title>
+    <meta name="description"
+        content="Walkthrough: turn a pull request into a focused reviewer's map — what functions changed, the blast radius, risk flags, and a clickable file:line on every reference — so review on a large codebase takes minutes, not hours.">
+    <link rel="canonical" href="https://haider1998.github.io/pyvisualizer/use-cases/review-a-pr.html">
+    <link rel="stylesheet" href="../style.css">
+    <link rel="stylesheet" href="_uc.css">
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "HowTo",
+      "name": "Review a pull request faster with py-code-visualizer",
+      "description": "Generate a focused review report — changed functions, blast radius, risk flags, and a changed-neighborhood diagram — with a clickable file:line on every reference.",
+      "totalTime": "PT2M",
+      "tool": [{ "@type": "HowToTool", "name": "py-code-visualizer" }],
+      "step": [
+        {
+          "@type": "HowToStep",
+          "name": "Run the review against the base branch",
+          "text": "Run 'py-code-visualizer review . --base origin/main'. It detects the changed functions from git, computes their blast radius, flags risks, and emits a Markdown report.",
+          "url": "https://haider1998.github.io/pyvisualizer/use-cases/review-a-pr.html#run"
+        },
+        {
+          "@type": "HowToStep",
+          "name": "Post it as a PR comment in CI",
+          "text": "Run 'py-code-visualizer init --with review' to generate a GitHub Actions workflow that posts the report as a PR comment automatically.",
+          "url": "https://haider1998.github.io/pyvisualizer/use-cases/review-a-pr.html#ci"
+        }
+      ]
+    }
+    </script>
+</head>
+<body>
+    <nav class="nav" id="nav">
+        <div class="nav-container">
+            <a href="../index.html" class="nav-logo">
+                <img src="../images/PyVizualizer_Logo.png" alt="py-code-visualizer" class="logo-img">
+            </a>
+            <ul class="nav-menu">
+                <li><a href="index.html" class="nav-link">Use cases</a></li>
+                <li><a href="../playground.html" class="nav-link">Playground</a></li>
+                <li><a href="https://github.com/haider1998/PyVisualizer" class="nav-github">GitHub</a></li>
+            </ul>
+        </div>
+    </nav>
+
+    <header class="uc-hero">
+        <div class="container">
+            <span class="section-badge">Use case · Code review</span>
+            <h1>Review a PR in minutes, not hours</h1>
+            <p class="lead">A 40-file diff lands in a 200k-line repo. No reviewer can read every file.
+                What they actually need is three things: <em>what functions changed, what those
+                changes can reach, and where to look</em> — each one a click from the source.</p>
+            <div class="uc-meta">
+                <span class="uc-tag">review</span>
+                <span class="uc-tag">blast radius</span>
+                <span class="uc-tag">clickable file:line</span>
+                <span class="uc-tag">PR comment</span>
+            </div>
+        </div>
+    </header>
+
+    <main class="uc-body container">
+        <p>Grep tells you where a name appears; it can't tell you the <em>transitive</em> reach of a
+            change, or that an edit just closed a dependency loop three hops away. The call graph can —
+            deterministically, so the same report goes in the PR every time. <code>review</code> reads
+            the git diff, maps the changed lines onto functions, and hands the reviewer a focused map.</p>
+
+        <div class="uc-step" id="run">
+            <span class="step-num">1</span><h3>One command turns a diff into a map</h3>
+            <p style="margin-top:1rem">Point it at the base branch. It reports the changed functions,
+                the blast radius (transitive callers), the call sites to review, any risk flags, and a
+                Mermaid diagram of just the changed neighborhood — every reference a clickable
+                <code>file:line</code>.</p>
+            <div class="uc-cmd"><span class="p">$</span> py-code-visualizer review . --base origin/main</div>
+            <p>On a service where a refactor added an audit hook, the report reads:</p>
+            <div class="uc-out"><span class="warn">## 🔍 Architecture Review</span>
+
+<b>2</b> function(s) changed vs `main` · blast radius <b>4</b> caller(s) across <b>2</b> module(s).
+
+### ✏️ What changed
+- <span class="ok">core.persist</span>  (core.py:7)
+- <span class="ok">service.audit</span> (service.py:15)
+
+### 🎯 Impacted area — review these call sites
+- core.persist is called by: service.place_order, service.cancel_order, service.audit
+- service.audit is called by: core.persist
+
+### ⚠️ Risk flags
+- 🔴 <span class="bad">Cycle involves a changed function:</span> persist → audit → persist</div>
+            <p>The reviewer instantly knows the change touches <code>persist</code> (a function four
+                callers depend on) and that it <strong>introduced a circular dependency</strong> — the
+                thing easiest to miss by eye, surfaced automatically. In the real report each function
+                name is a link straight to the line on GitHub.</p>
+        </div>
+
+        <div class="uc-step" id="ci">
+            <span class="step-num">2</span><h3>Make it automatic on every PR</h3>
+            <p style="margin-top:1rem">You don't want to remember to run it. One opt-in setup writes a
+                GitHub Actions workflow that posts the report as a PR comment — nothing else added.</p>
+            <div class="uc-cmd"><span class="p">$</span> py-code-visualizer init --with review</div>
+            <div class="uc-out"><span class="ok">Set up: review  (CI: github)</span>
+  created: .github/workflows/pyvisualizer-review.yml</div>
+            <p>From the next PR on, reviewers open to a focused map instead of a wall of files. Add
+                <code>--fail-above N</code> if your team wants to gate on an oversized blast radius —
+                otherwise <code>review</code> stays a pure report and never blocks a merge.</p>
+        </div>
+
+        <div class="uc-benefit">
+            <p style="margin:0"><strong>What you got.</strong> Every PR now opens with the answer to
+                "what do I actually need to look at here?" — the changed functions, a measured blast
+                radius, the exact call sites, and automatic detection of newly introduced cycles, each
+                one a click from the source. Large-repo review stops being archaeology.</p>
+        </div>
+
+        <p class="uc-note">The report is deterministic (same input → byte-identical output) and every
+            reference is a real <code>file:line</code> — links resolve to GitHub when a remote is
+            detected, plain text otherwise. See also the
+            <a href="fearless-refactor.html">blast-radius &amp; cycle-gate walkthrough</a>.</p>
+
+        <a href="index.html" class="uc-nav-back">← All use cases</a>
+    </main>
+
+    <footer class="footer">
+        <div class="container">
+            <p style="text-align:center;opacity:.7;padding:2rem 0">
+                Deterministic, AST-verified architecture ground truth ·
+                <a href="https://github.com/haider1998/PyVisualizer">py-code-visualizer</a> · MIT
+            </p>
+        </div>
+    </footer>
+    <script src="../script.js"></script>
+</body>
+</html>

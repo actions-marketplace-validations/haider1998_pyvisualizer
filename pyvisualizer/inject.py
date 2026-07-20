@@ -48,27 +48,25 @@ def build_block(
     return "\n".join(lines)
 
 
-def inject(
+def inject_block(
     content: str,
-    mermaid_code: str,
+    block: str,
     *,
-    heading: Optional[str] = None,
-    footer: Optional[str] = None,
+    start_marker: str = START_MARKER,
+    end_marker: str = END_MARKER,
     section_title: str = "## 🗺️ Architecture",
 ) -> Tuple[str, bool]:
-    """Return ``(new_content, changed)`` after injecting/updating the block.
+    """Return ``(new_content, changed)`` after injecting/updating a marker block.
 
-    - If both markers are present, replace whatever is between them.
-    - If markers are absent, append a new titled section at the end.
-    - ``changed`` is False when the file already contains the exact block.
+    Generic over the marker pair and the block content, so both the Mermaid
+    diagram (readme) and other sections (e.g. AGENTS.md) share one idempotent
+    replace-between-markers-or-append implementation.
     """
-    block = build_block(mermaid_code, heading=heading, footer=footer)
-
-    start = content.find(START_MARKER)
-    end = content.find(END_MARKER)
+    start = content.find(start_marker)
+    end = content.find(end_marker)
 
     if start != -1 and end != -1 and end > start:
-        end_full = end + len(END_MARKER)
+        end_full = end + len(end_marker)
         new_content = content[:start] + block + content[end_full:]
         return new_content, (new_content != content)
 
@@ -81,6 +79,24 @@ def inject(
     addition = f"{separator}{section_title}\n\n{block}\n"
     new_content = content + addition
     return new_content, True
+
+
+def inject(
+    content: str,
+    mermaid_code: str,
+    *,
+    heading: Optional[str] = None,
+    footer: Optional[str] = None,
+    section_title: str = "## 🗺️ Architecture",
+) -> Tuple[str, bool]:
+    """Return ``(new_content, changed)`` after injecting/updating the diagram block.
+
+    - If both markers are present, replace whatever is between them.
+    - If markers are absent, append a new titled section at the end.
+    - ``changed`` is False when the file already contains the exact block.
+    """
+    block = build_block(mermaid_code, heading=heading, footer=footer)
+    return inject_block(content, block, section_title=section_title)
 
 
 def update_file(

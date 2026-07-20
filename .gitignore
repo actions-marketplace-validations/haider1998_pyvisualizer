@@ -151,6 +151,9 @@ diagrams/
 !docs/**/*.svg
 !docs/**/*.png
 
+# Internal AI working notes — local only, never push
+CLAUDE.md
+
 # OS generated files
 .DS_Store
 .DS_Store?

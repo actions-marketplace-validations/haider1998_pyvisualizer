@@ -91,3 +91,28 @@ def render_text(result: ImpactResult) -> str:
     lines.append(f"Transitive blast radius: {result.blast_radius} caller(s)")
     lines.append(f"Modules affected: {', '.join(result.modules_affected) or '(none)'}")
     return "\n".join(lines)
+
+
+def render_markdown(result: ImpactResult, G: nx.DiGraph, project_root: str) -> str:
+    """PR-comment-ready blast radius, with clickable ``file:line`` references."""
+    from pyvisualizer.changes import Linker
+
+    if not result.found:
+        return f"⚠️ `{result.target}` not found in the call graph."
+    link = Linker(G, project_root, markdown=True)
+    lines = [
+        f"### 💥 Impact — {link.ref(result.target)}",
+        "",
+        risk_line(result),
+        "",
+        f"**Direct callers ({len(result.direct_callers)})**",
+    ]
+    lines += [f"- {link.ref(c)}" for c in result.direct_callers] or ["- (none)"]
+    lines.append("")
+    lines.append(f"**Direct callees ({len(result.direct_callees)})**")
+    lines += [f"- {link.ref(c)}" for c in result.direct_callees] or ["- (none)"]
+    lines.append("")
+    lines.append(
+        f"Modules affected: {', '.join(f'`{m}`' for m in result.modules_affected) or '(none)'}"
+    )
+    return "\n".join(lines)

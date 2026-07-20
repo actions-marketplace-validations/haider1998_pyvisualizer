@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Feed your AI agent verified context — py-code-visualizer use case</title>
+    <meta name="description"
+        content="Walkthrough: give an AI coding agent a small, verified, task-scoped context pack instead of the whole repo — ~96% fewer tokens on a 100k-line project, every fact carrying file:line provenance and zero hallucinated edges.">
+    <link rel="canonical" href="https://haider1998.github.io/pyvisualizer/use-cases/agent-context.html">
+    <link rel="stylesheet" href="../style.css">
+    <link rel="stylesheet" href="_uc.css">
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "HowTo",
+      "name": "Give an AI agent verified, task-scoped context with py-code-visualizer",
+      "description": "Generate a small, verified context pack centered on the functions a task touches, and wire AGENTS.md so agents consume the ground truth instead of re-deriving architecture from source.",
+      "totalTime": "PT2M",
+      "tool": [{ "@type": "HowToTool", "name": "py-code-visualizer" }],
+      "step": [
+        {
+          "@type": "HowToStep",
+          "name": "Build a task-scoped context pack",
+          "text": "Run 'py-code-visualizer context --focus <function-or-file>' to get a verified pack of just that function, its callers/callees, and PageRank-selected relevant neighbors under a token budget.",
+          "url": "https://haider1998.github.io/pyvisualizer/use-cases/agent-context.html#pack"
+        },
+        {
+          "@type": "HowToStep",
+          "name": "Wire AGENTS.md so agents use it",
+          "text": "Run 'py-code-visualizer export --for-ai' to write ARCHITECTURE.json and inject an AGENTS.md section telling any agent to consult the verified graph and run the context command.",
+          "url": "https://haider1998.github.io/pyvisualizer/use-cases/agent-context.html#wire"
+        }
+      ]
+    }
+    </script>
+</head>
+<body>
+    <nav class="nav" id="nav">
+        <div class="nav-container">
+            <a href="../index.html" class="nav-logo">
+                <img src="../images/PyVizualizer_Logo.png" alt="py-code-visualizer" class="logo-img">
+            </a>
+            <ul class="nav-menu">
+                <li><a href="index.html" class="nav-link">Use cases</a></li>
+                <li><a href="../playground.html" class="nav-link">Playground</a></li>
+                <li><a href="https://github.com/haider1998/PyVisualizer" class="nav-github">GitHub</a></li>
+            </ul>
+        </div>
+    </nav>
+
+    <header class="uc-hero">
+        <div class="container">
+            <span class="section-badge">Use case · AI agents</span>
+            <h1>Feed your agent the right context</h1>
+            <p class="lead">An AI agent asked to change one function doesn't need your whole repo read
+                into its context window. It needs the <em>verified</em> neighborhood of its task — and
+                nothing it has to guess. Give it exactly that: smaller, cheaper, and correct by
+                construction.</p>
+            <div class="uc-meta">
+                <span class="uc-tag">context --focus</span>
+                <span class="uc-tag">~96% fewer tokens</span>
+                <span class="uc-tag">100% verified</span>
+                <span class="uc-tag">AGENTS.md</span>
+            </div>
+        </div>
+    </header>
+
+    <main class="uc-body container">
+        <p>Point an agent at raw source and it re-derives the architecture on every task — inventing
+            call relationships, missing what didn't fit the window, and paying for thousands of tokens
+            to reconstruct facts it could have looked up. A context pack flips that: the structure is
+            already parsed, every edge is real, and the pack is a fraction of the size.</p>
+
+        <div class="uc-step" id="pack">
+            <span class="step-num">1</span><h3>Build a pack centered on the task</h3>
+            <p style="margin-top:1rem">Name the function (or file) the agent will work on.
+                <code>context</code> always includes it and its direct callers/callees, then grows to a
+                token budget by ranking the rest of the graph with personalized PageRank — the most
+                relevant neighbors first.</p>
+            <div class="uc-cmd"><span class="p">$</span> py-code-visualizer context . --focus persist --budget-tokens 4000</div>
+            <div class="uc-out"># Context Pack — yourproject
+
+- Focus: `core.persist`
+- Included functions: <b>9</b> (omitted 0 under budget)
+- Estimated size: ~365 tokens (pack) vs ~54,000 tokens (full source)
+
+## Functions
+- `core.persist(record)` — core.py:7
+- `service.place_order(order)` — service.py:7
+  …
+
+## Verified calls (caller → callee · confidence · provenance)
+- `service.place_order` → `core.persist` · resolved · service.py:8
+- `core.persist` → `service.audit` · resolved · core.py:9
+  …
+
+## Circular dependencies touching this area
+- `persist → audit → persist`</div>
+            <p>Every function is real, every call edge is parsed from the AST with a
+                <code>file:line</code>, and ambiguous calls are flagged rather than guessed. The agent
+                opens the cited line only when it needs a body — the pack itself stays tiny.</p>
+        </div>
+
+        <div class="uc-step">
+            <span class="step-num">2</span><h3>The saving scales with the codebase</h3>
+            <p style="margin-top:1rem">On a small project the pack and the source are comparable. On a
+                real one, the pack stays small while the source doesn't. Measured on a deterministic
+                100,000-line project, focusing on a single central function:</p>
+            <div class="uc-proof-grid">
+                <div class="uc-proof"><div class="num">~96%</div><div class="lbl">fewer tokens than feeding the whole source</div></div>
+                <div class="uc-proof"><div class="num">455</div><div class="lbl">functions in the pack, of 26,658 total</div></div>
+                <div class="uc-proof"><div class="num">100%</div><div class="lbl">of pack edges carry <code>file:line</code>, zero guessed</div></div>
+            </div>
+            <p class="uc-note" style="border:0;margin-top:0">Measured with <code>python benchmarks/bench.py</code>
+                (estimate, chars÷4). Speed and ratios are reproducible; the numbers live in
+                <a href="../benchmarks.json">benchmarks.json</a>.</p>
+        </div>
+
+        <div class="uc-step" id="wire">
+            <span class="step-num">3</span><h3>Make sure the agent actually uses it</h3>
+            <p style="margin-top:1rem">A pack only helps if the agent reaches for it. <code>export</code>
+                writes the verified graph and injects a section into <code>AGENTS.md</code> — the file
+                Copilot, Cursor, and Claude Code all read automatically — telling the agent to consult
+                the ground truth and run <code>context</code> for task-scoped facts.</p>
+            <div class="uc-cmd"><span class="p">$</span> py-code-visualizer export --for-ai .</div>
+            <div class="uc-out"><span class="ok">Wrote ARCHITECTURE.json, ARCHITECTURE.md and AGENTS.md</span></div>
+            <p>Wire it into CI with <code>py-code-visualizer export --check</code> (via
+                <code>init --with context</code>) so a PR fails if the committed ground truth goes
+                stale — the agent always reads current facts, never yesterday's.</p>
+        </div>
+
+        <div class="uc-benefit">
+            <p style="margin:0"><strong>What you got.</strong> Your agents consume a verified,
+                task-scoped slice of the architecture — <strong>~96% smaller</strong> than the raw
+                source on a large repo, with a <code>file:line</code> on every fact and not a single
+                guessed edge — and an <code>AGENTS.md</code> that makes them reach for it by default.
+                Point your agent at the graph, not the repo.</p>
+        </div>
+
+        <a href="index.html" class="uc-nav-back">← All use cases</a>
+    </main>
+
+    <footer class="footer">
+        <div class="container">
+            <p style="text-align:center;opacity:.7;padding:2rem 0">
+                Deterministic, AST-verified architecture ground truth ·
+                <a href="https://github.com/haider1998/PyVisualizer">py-code-visualizer</a> · MIT
+            </p>
+        </div>
+    </footer>
+    <script src="../script.js"></script>
+</body>
+</html>

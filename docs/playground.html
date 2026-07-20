@@ -30,6 +30,9 @@ button:hover,label.btn:hover{border-color:var(--accent2)}
 .btn-primary{background:var(--accent);border-color:var(--accent);color:#fff}
 input[type=search]{font:inherit;font-size:13px;color:var(--text);background:var(--panel2);
   border:1px solid var(--border);border-radius:8px;padding:7px 12px;outline:none;min-width:170px}
+select#preset{font:inherit;font-size:13px;color:var(--text);background:var(--panel2);
+  border:1px solid var(--border);border-radius:8px;padding:7px 12px;cursor:pointer;outline:none}
+select#preset:hover{border-color:var(--accent2)}
 #main{flex:1;position:relative;overflow:hidden}
 #graph{width:100%;height:100%;display:block;cursor:grab}
 #graph.grabbing{cursor:grabbing}
@@ -64,6 +67,13 @@ input[type=search]{font:inherit;font-size:13px;color:var(--text);background:var(
     <span class="badge" id="stat">drop a .py file to begin</span>
     <div class="spacer"></div>
     <input type="search" id="search" placeholder="Search functions… (/)">
+    <select id="preset" title="Load a use-case scenario">
+      <option value="">▼ Load a scenario…</option>
+      <option value="sample">Sample project</option>
+      <option value="orphan">Orphan monolith (onboarding)</option>
+      <option value="soc2">Layered app (SOC 2 gate)</option>
+      <option value="refactor">Refactor (before → cycle)</option>
+    </select>
     <label class="btn" for="fileInput">📂 Open .py file(s)</label>
     <input id="fileInput" type="file" accept=".py" multiple hidden>
     <button id="sampleBtn" class="btn-primary">▶ Load sample project</button>
@@ -274,8 +284,9 @@ function render(result){
   document.getElementById("legend").style.display="";
   document.getElementById("note").style.display="";
   document.getElementById("tip").style.display="";
+  const ms=result._ms!=null?` · parsed in ${result._ms.toFixed(1)} ms in your browser`:"";
   document.getElementById("stat").textContent=
-    `${model.nodes.length} functions · ${model.links.length} calls`+(result.ambiguous?` · ${result.ambiguous} ambiguous`:"");
+    `${model.nodes.length} functions · ${model.links.length} calls`+(result.ambiguous?` · ${result.ambiguous} ambiguous`:"")+ms;
   resize();build();layout();setTimeout(fit,420);
 }
 
@@ -286,11 +297,19 @@ const drop=document.getElementById("drop");
 window.addEventListener("dragover",e=>e.preventDefault());
 window.addEventListener("drop",e=>{e.preventDefault();if(e.dataTransfer&&e.dataTransfer.files.length)readFiles(e.dataTransfer.files);});
 document.getElementById("fileInput").addEventListener("change",e=>readFiles(e.target.files));
+// Time the pure-JS analysis so the readout is honest — measured right here,
+// in the visitor's browser, nothing uploaded.
+function analyzeAndRender(files){
+  const t0=performance.now();
+  const result=analyze(files);
+  result._ms=performance.now()-t0;
+  render(result);
+}
 function readFiles(fileList){
   const files=[...fileList].filter(f=>f.name.endsWith(".py"));
   if(!files.length)return;
   let pending=files.length;const out=[];
-  files.forEach(f=>{const r=new FileReader();r.onload=()=>{out.push({name:f.name,text:r.result});if(--pending===0)render(analyze(out));};r.readAsText(f);});
+  files.forEach(f=>{const r=new FileReader();r.onload=()=>{out.push({name:f.name,text:r.result});if(--pending===0)analyzeAndRender(out);};r.readAsText(f);});
 }
 document.getElementById("search").addEventListener("input",e=>{const q=e.target.value.toLowerCase().trim();
   if(!q){clearHl();return;}let first=null;
@@ -352,9 +371,150 @@ class EmailService:
         pass
 `}
 ];
-function loadSample(){render(analyze(SAMPLE));}
+function loadSample(){analyzeAndRender(SAMPLE);}
 document.getElementById("sampleBtn").addEventListener("click",loadSample);
 document.getElementById("sampleBtn2").addEventListener("click",loadSample);
+
+// ---- Scenario presets (trimmed versions of the repo's runnable fixtures) ----
+const PRESETS={
+  orphan:[
+    {name:"app/cli.py",text:`from app.pipeline import ReportPipeline
+from app.storage import Warehouse
+
+def run(period):
+    warehouse = Warehouse()
+    pipeline = ReportPipeline(warehouse)
+    report = pipeline.build(period)
+    return pipeline.render(report)
+`},
+    {name:"app/pipeline.py",text:`from app.transforms import normalize, summarize
+
+class ReportPipeline:
+    def __init__(self, warehouse):
+        self.warehouse = warehouse
+
+    def build(self, period):
+        rows = self.warehouse.fetch(period)
+        clean = normalize(rows)
+        return summarize(clean)
+
+    def render(self, report):
+        return self._format(report)
+
+    def _format(self, report):
+        return report
+`},
+    {name:"app/storage.py",text:`class Warehouse:
+    def fetch(self, period):
+        return self._query(period)
+
+    def _query(self, period):
+        return []
+
+def load_from_csv(path):
+    return _parse_csv_line(path)
+
+def _parse_csv_line(line):
+    return line.split(",")
+`},
+    {name:"app/transforms.py",text:`from app.helpers import scrub
+
+def normalize(rows):
+    return [scrub(r) for r in rows]
+
+def summarize(rows):
+    total = 0
+    for r in rows:
+        r = clean(r)
+        total += r.get("amount", 0)
+    return {"total": total}
+`},
+    {name:"app/helpers.py",text:`def scrub(row):
+    return row
+
+def clean(row):
+    return row
+`},
+    {name:"app/legacy.py",text:`def clean(row):
+    return row
+
+def archive(report):
+    return {"archived": report}
+`}
+  ],
+  soc2:[
+    {name:"api/routes.py",text:`from domain.billing import BillingService
+
+class BillingController:
+    def __init__(self):
+        self.service = BillingService()
+
+    def post_charge(self, request):
+        return self.service.charge(request)
+`},
+    {name:"api/notifier.py",text:`def send_receipt(invoice):
+    return {"emailed": invoice}
+`},
+    {name:"domain/billing.py",text:`from api.notifier import send_receipt
+from infra.db import InvoiceRepository
+
+class BillingService:
+    def __init__(self):
+        self.repo = InvoiceRepository()
+
+    def charge(self, invoice):
+        stored = self.repo.save(invoice)
+        send_receipt(stored)   # domain -> api : the boundary violation
+        return stored
+`},
+    {name:"infra/db.py",text:`class InvoiceRepository:
+    def save(self, invoice):
+        return self._write(invoice)
+
+    def _write(self, invoice):
+        return {"stored": invoice}
+`}
+  ],
+  refactor:[
+    {name:"handlers.py",text:`from service import cancel_order, place_order
+
+class OrderHandler:
+    def create(self, request):
+        return place_order(request)
+
+    def cancel(self, request):
+        return cancel_order(request["id"])
+`},
+    {name:"service.py",text:`from core import persist
+
+def place_order(order):
+    return persist(order)
+
+def cancel_order(order_id):
+    return persist({"cancel": order_id})
+`},
+    {name:"core.py",text:`def persist(record):
+    validated = validate(record)
+    return _write(validated)
+
+def validate(record):
+    return _rules(record)
+
+def _write(record):
+    return {"stored": record}
+
+def _rules(record):
+    return record
+`}
+  ]
+};
+document.getElementById("preset").addEventListener("change",e=>{
+  const v=e.target.value;
+  if(!v)return;
+  if(v==="sample")analyzeAndRender(SAMPLE);
+  else if(PRESETS[v])analyzeAndRender(PRESETS[v]);
+  e.target.selectedIndex=0;   // reset so the same scenario can be re-picked
+});
 
 resize();
 </script>

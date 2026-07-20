@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Blast radius of a Python refactor — py-code-visualizer use case</title>
+    <meta name="description"
+        content="Walkthrough: measure the blast radius of a change before you make it, then catch a newly introduced circular dependency in the PR — deterministically, at the call-graph level.">
+    <link rel="canonical" href="https://haider1998.github.io/pyvisualizer/use-cases/fearless-refactor.html">
+    <link rel="stylesheet" href="../style.css">
+    <link rel="stylesheet" href="_uc.css">
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "HowTo",
+      "name": "Measure refactor blast radius and gate new cycles with py-code-visualizer",
+      "description": "Compute the transitive blast radius of a function before changing it, then diff two graph snapshots in a PR to catch newly introduced circular dependencies.",
+      "totalTime": "PT2M",
+      "tool": [{ "@type": "HowToTool", "name": "py-code-visualizer" }],
+      "step": [
+        {
+          "@type": "HowToStep",
+          "name": "Measure the blast radius",
+          "text": "Run 'py-code-visualizer impact <function> <project>' to see the transitive callers and callees a change would affect, across how many modules.",
+          "url": "https://haider1998.github.io/pyvisualizer/use-cases/fearless-refactor.html#impact"
+        },
+        {
+          "@type": "HowToStep",
+          "name": "Diff two snapshots and gate new cycles",
+          "text": "Emit JSON before and after, then run 'py-code-visualizer diff base.json head.json --fail-on-new-cycles' to fail the PR if a circular dependency was introduced.",
+          "url": "https://haider1998.github.io/pyvisualizer/use-cases/fearless-refactor.html#diff"
+        }
+      ]
+    }
+    </script>
+</head>
+<body>
+    <nav class="nav" id="nav">
+        <div class="nav-container">
+            <a href="../index.html" class="nav-logo">
+                <img src="../images/PyVizualizer_Logo.png" alt="py-code-visualizer" class="logo-img">
+            </a>
+            <ul class="nav-menu">
+                <li><a href="../index.html#use-cases" class="nav-link">Use cases</a></li>
+                <li><a href="../playground.html" class="nav-link">Playground</a></li>
+                <li><a href="https://github.com/haider1998/PyVisualizer" class="nav-github">GitHub</a></li>
+            </ul>
+        </div>
+    </nav>
+
+    <header class="uc-hero">
+        <div class="container">
+            <span class="section-badge">Use case · Refactoring</span>
+            <h1>The fearless refactor</h1>
+            <p class="lead">You need to change <code>persist()</code> — the function at the bottom of
+                everything. The question that keeps you up: what actually breaks if you do? And how do
+                you stop a reviewer from rubber-stamping a change that quietly introduces a circular
+                dependency?</p>
+            <div class="uc-meta">
+                <span class="uc-tag">impact</span>
+                <span class="uc-tag">json</span>
+                <span class="uc-tag">diff --fail-on-new-cycles</span>
+            </div>
+        </div>
+    </header>
+
+    <main class="uc-body container">
+        <p>Grep tells you where a name appears. It doesn't tell you the <em>transitive</em> blast
+            radius, and it can't tell you whether your change closed a dependency loop three call-hops
+            away. The call graph can — deterministically, so the same answer goes in the PR every time.</p>
+
+        <p>The fixture (<code>examples/scenarios/refactor</code>) ships a small service in two states,
+            <code>before/</code> and <code>after/</code>, where the "after" refactor adds an audit hook
+            that accidentally creates a cycle. Real commands, real output.</p>
+
+        <div class="uc-step" id="impact">
+            <span class="step-num">1</span><h3>Measure the blast radius before you touch it</h3>
+            <p style="margin-top:1rem"><code>impact</code> reports the transitive callers and callees of
+                a function and how many modules they span — the "if I break this, who feels it" number.</p>
+            <div class="uc-cmd"><span class="p">$</span> py-code-visualizer impact persist examples/scenarios/refactor/before</div>
+            <div class="uc-out">Impact analysis for: core.persist
+<span class="warn">⚠️ Touching `persist` affects **4** transitive caller(s) across **3** module(s).</span>
+
+Direct callers (2):
+    ← service.cancel_order
+    ← service.place_order
+Direct callees (2):
+    → core._write
+    → core.validate
+Transitive blast radius: 4 caller(s)
+Modules affected: core, handlers, service</div>
+            <p>Now the PR description writes itself: <em>"Changes <code>persist</code> — 4 transitive
+                callers across 3 modules. Reviewers from those areas, please look."</em> That one line
+                is what makes a reviewer slow down at the right moment.</p>
+        </div>
+
+        <div class="uc-step" id="diff">
+            <span class="step-num">2</span><h3>Catch the cycle the refactor introduced</h3>
+            <p style="margin-top:1rem">Snapshot the graph before and after as canonical JSON, then diff
+                them. The refactor added an <code>audit()</code> hook that calls back into
+                <code>persist()</code> — a brand-new circular dependency. The gate refuses to let it
+                through.</p>
+            <div class="uc-cmd"><span class="p">$</span> py-code-visualizer json examples/scenarios/refactor/before -o base.json
+<span class="p">$</span> py-code-visualizer json examples/scenarios/refactor/after  -o head.json
+<span class="p">$</span> py-code-visualizer diff base.json head.json --fail-on-new-cycles</div>
+            <div class="uc-out">## 🗺️ Architecture Change Report
+
+**Architecture Health:** C → D+ 📉 (74 → 69)
+
+### 🔴 New circular dependencies
+
+- `persist → audit → persist`
+
+| Metric | Base | Head | Δ |
+|---|---|---|---|
+| Functions | 9 | 9 | 0 |
+| Call edges | 7 | 9 | +2 |
+| Cross-module edges | 4 | 6 | +2 |
+
+### 🔗 Added calls (2)
+
+- `persist` → `audit`
+- `audit` → `persist`</div>
+            <div class="uc-label">exit code</div>
+            <div class="uc-out">$ echo $?
+<span class="bad">2</span>   # new cycle detected — PR check fails</div>
+            <p>The reviewer sees the health grade slip <strong>C → D+</strong>, the exact new cycle, and
+                the two edges that caused it — rendered as a Markdown comment right in the PR. Nobody has
+                to notice the loop by hand; the gate did.</p>
+        </div>
+
+        <div class="uc-benefit">
+            <p style="margin:0"><strong>What you got.</strong> A pre-flight blast-radius number
+                (<strong>4 transitive callers across 3 modules</strong>) that tells reviewers where to
+                look, and a deterministic PR gate that caught a <strong>newly introduced cycle</strong>
+                — <code>persist → audit → persist</code> — and failed the build (exit 2) before it
+                merged. Refactoring stops being a leap of faith.</p>
+        </div>
+
+        <p class="uc-note">Every block above is verbatim output from the commands run against
+            <code>examples/scenarios/refactor</code>. Wire <code>diff</code> into a GitHub Action to
+            post the report as a PR comment automatically — see
+            <a href="../integrations.md">docs/integrations.md</a>.</p>
+
+        <a href="index.html" class="uc-nav-back">← All use cases</a>
+    </main>
+
+    <footer class="footer">
+        <div class="container">
+            <p style="text-align:center;opacity:.7;padding:2rem 0">
+                Deterministic, AST-verified architecture ground truth ·
+                <a href="https://github.com/haider1998/PyVisualizer">py-code-visualizer</a> · MIT
+            </p>
+        </div>
+    </footer>
+    <script src="../script.js"></script>
+</body>
+</html>

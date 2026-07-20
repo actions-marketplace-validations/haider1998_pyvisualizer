@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Map an undocumented Python monolith — py-code-visualizer use case</title>
+    <meta name="description"
+        content="Walkthrough: inherit an undocumented Python monolith and get a trustworthy architecture map, a health grade, and a dead-code review list in three commands — every edge traceable to a file:line.">
+    <link rel="canonical" href="https://haider1998.github.io/pyvisualizer/use-cases/orphan-monolith.html">
+    <link rel="stylesheet" href="../style.css">
+    <link rel="stylesheet" href="_uc.css">
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "HowTo",
+      "name": "Map an undocumented Python monolith with py-code-visualizer",
+      "description": "Turn an undocumented, inherited Python codebase into a trustworthy architecture map, a health grade, and a dead-code review list using deterministic AST analysis.",
+      "totalTime": "PT2M",
+      "tool": [{ "@type": "HowToTool", "name": "py-code-visualizer" }],
+      "step": [
+        {
+          "@type": "HowToStep",
+          "name": "Generate an interactive map",
+          "text": "Run 'py-code-visualizer visualize <project> -o map.html' to build a self-contained interactive call graph. No code is executed and the HTML makes zero network requests.",
+          "url": "https://haider1998.github.io/pyvisualizer/use-cases/orphan-monolith.html#map"
+        },
+        {
+          "@type": "HowToStep",
+          "name": "Grade the architecture",
+          "text": "Run 'py-code-visualizer health <project>' to get an A–F architecture health score with a breakdown of coupling, cycles, and orphans.",
+          "url": "https://haider1998.github.io/pyvisualizer/use-cases/orphan-monolith.html#health"
+        },
+        {
+          "@type": "HowToStep",
+          "name": "Find dead code",
+          "text": "Run 'py-code-visualizer check <project> --dead-code' to list functions unreachable from any detected entry point — a review list, not a delete list.",
+          "url": "https://haider1998.github.io/pyvisualizer/use-cases/orphan-monolith.html#dead"
+        }
+      ]
+    }
+    </script>
+</head>
+<body>
+    <nav class="nav" id="nav">
+        <div class="nav-container">
+            <a href="../index.html" class="nav-logo">
+                <img src="../images/PyVizualizer_Logo.png" alt="py-code-visualizer" class="logo-img">
+            </a>
+            <ul class="nav-menu">
+                <li><a href="../index.html#use-cases" class="nav-link">Use cases</a></li>
+                <li><a href="../playground.html" class="nav-link">Playground</a></li>
+                <li><a href="https://github.com/haider1998/PyVisualizer" class="nav-github">GitHub</a></li>
+            </ul>
+        </div>
+    </nav>
+
+    <header class="uc-hero">
+        <div class="container">
+            <span class="section-badge">Use case · Onboarding</span>
+            <h1>The orphan monolith</h1>
+            <p class="lead">Five contractors built it. All five are gone. There are no docs, no
+                diagram, and a hundred thousand lines that nobody alive fully understands. You own it
+                now. Here is how you get the truth about it in about two minutes.</p>
+            <div class="uc-meta">
+                <span class="uc-tag">visualize</span>
+                <span class="uc-tag">health</span>
+                <span class="uc-tag">check --dead-code</span>
+                <span class="uc-tag">no code executed</span>
+            </div>
+        </div>
+    </header>
+
+    <main class="uc-body container">
+        <p>An LLM will happily "diagram" this repo for you. It will also invent a couple of modules
+            that were never there, quietly drop the ones that didn't fit its context window, and give
+            you a different answer every time you ask. You cannot onboard onto a guess. You need the
+            map that matches the code — the one you can click into and verify line by line.</p>
+
+        <p>This page runs against a small, honest fixture that ships in the repo
+            (<code>examples/scenarios/orphan_monolith</code>) so every command and every line of
+            output below is real — you can run it yourself and get the same result.</p>
+
+        <div class="uc-step" id="map">
+            <span class="step-num">1</span><h3>Generate a map you can trust</h3>
+            <p style="margin-top:1rem">One command turns the whole tree into a single interactive HTML
+                file. It opens offline, makes zero network requests, and never imported or ran a line
+                of the target code.</p>
+            <div class="uc-cmd"><span class="p">$</span> py-code-visualizer visualize examples/scenarios/orphan_monolith -o map.html</div>
+            <p>Open <code>map.html</code> and every node is a real function; click any edge and it
+                shows you the exact <code>file:line</code> where that call happens. Where two different
+                <code>clean()</code> functions could be the target of one call, the tool does not pick
+                one and pretend — it draws the edge <em>dashed</em> and keeps both candidates:</p>
+            <div class="uc-label">the honest edge, from the JSON graph</div>
+            <div class="uc-out">AMBIGUOUS: app.transforms.summarize → app.helpers.clean
+    candidates = ['app.helpers.clean', 'app.legacy.clean']
+    at app/transforms.py:16</div>
+            <p>That single dashed line is the whole philosophy: a tool that markets ground truth is not
+                allowed to bluff.</p>
+        </div>
+
+        <div class="uc-step" id="health">
+            <span class="step-num">2</span><h3>Get a grade you can defend</h3>
+            <p style="margin-top:1rem">Before you touch anything, you want a number. <code>health</code>
+                scores the architecture A–F from the graph itself — coupling, cycles, hub risk,
+                orphans, ambiguity — and shows its work.</p>
+            <div class="uc-cmd"><span class="p">$</span> py-code-visualizer health examples/scenarios/orphan_monolith</div>
+            <div class="uc-out">Architecture Health: <span class="warn">D+  (69/100)</span>  — orphan_monolith
+
+Component penalties:
+    coupling   -25
+    cycles     +0
+    hub_risk   +0
+    orphans    -4
+    ambiguity  -2
+
+Cycles: 0 · God-nodes: 0 · Orphans: 2 · Cross-module: 64%</div>
+            <p>Now you can say something concrete in your first standup: <em>"It's a D+. The problem
+                isn't cycles — it's coupling and orphaned code. Here's the plan."</em> And because the
+                score is deterministic, you can put it in CI and watch it move on every PR.</p>
+        </div>
+
+        <div class="uc-step" id="dead">
+            <span class="step-num">3</span><h3>Find the code nobody calls</h3>
+            <p style="margin-top:1rem">Half of onboarding is learning which code is actually live.
+                <code>check --dead-code</code> lists functions unreachable from any detected entry
+                point (<code>main</code>, <code>run</code>, dunders, framework-decorated handlers).
+                It's conservative — a review list, not a delete list.</p>
+            <div class="uc-cmd"><span class="p">$</span> py-code-visualizer check examples/scenarios/orphan_monolith --dead-code</div>
+            <div class="uc-out"><span class="ok">✅ Architecture check passed: no rule or cycle violations.</span>
+
+<span class="warn">🟡 3 function(s) with no in-project callers (review — may be public API):</span>
+    app.legacy.archive
+    app.legacy.clean
+    app.storage.load_from_csv</div>
+            <p>Three functions the departed contractors left behind, surfaced in seconds — each one a
+                candidate for deletion once you confirm nothing external calls it.</p>
+        </div>
+
+        <div class="uc-benefit">
+            <p style="margin:0"><strong>What you got.</strong> In three commands and no code execution:
+                a verifiable interactive map (16 functions, 11 calls, 1 honestly-flagged ambiguous
+                edge), a defensible <strong>D+ (69/100)</strong> health grade with the reason spelled
+                out, and a <strong>3-function</strong> dead-code review list. No hallucinated modules,
+                no "trust me" — every claim clicks through to a line of source.</p>
+        </div>
+
+        <p class="uc-note">Every number on this page was produced by running the commands above
+            against <code>examples/scenarios/orphan_monolith</code> in the repository. Scale it up: the
+            same pipeline maps a real ~100k-line project in about five seconds —
+            <a href="../index.html#proof">see the measured benchmarks</a>. Reproduce them with
+            <code>python benchmarks/bench.py</code>.</p>
+
+        <a href="index.html" class="uc-nav-back">← All use cases</a>
+    </main>
+
+    <footer class="footer">
+        <div class="container">
+            <p style="text-align:center;opacity:.7;padding:2rem 0">
+                Deterministic, AST-verified architecture ground truth ·
+                <a href="https://github.com/haider1998/PyVisualizer">py-code-visualizer</a> · MIT
+            </p>
+        </div>
+    </footer>
+    <script src="../script.js"></script>
+</body>
+</html>

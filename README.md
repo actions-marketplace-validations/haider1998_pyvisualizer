@@ -123,14 +123,43 @@ forbid = ["domain -> api", "domain -> infra"]
 
 | Command | What it does |
 |---|---|
+| `review <path> --base <ref>` | **PR review report**: changed functions, blast radius, risk flags, focused subgraph — clickable `file:line` on every reference |
+| `context <path> --focus <fn>` | **Verified context pack for AI agents**: task-scoped, budget-bounded, zero guessed edges |
 | `visualize` | Render `html` · `mermaid` · `json` · `c4` · `svg`/`png` |
-| `readme` | Inject/update a Mermaid diagram in any Markdown file (idempotent) |
+| `readme` | Inject/update a Mermaid diagram in any Markdown file (idempotent) + jump-to-source index |
 | `json` | Emit the canonical, diffable graph JSON |
 | `diff base.json head.json` | PR-ready architecture-change report (+ new-cycle gate) |
 | `check` | Enforce layering rules & cycles — CI gate (`--dead-code` too) |
-| `impact <fn>` | Blast-radius: transitive callers/callees + risk line |
+| `impact <fn>` | Blast-radius: transitive callers/callees + risk line (`--format markdown`) |
 | `health` | Architecture health score (A–F) with an SVG badge |
-| `export` | `ARCHITECTURE.json` + `ARCHITECTURE.md` for AI tools |
+| `export` | `ARCHITECTURE.json` + `ARCHITECTURE.md` + AGENTS.md wiring (`--check` freshness gate) |
+| `init` | Opt-in setup — generate only the automation you choose (`review`/`readme`/`context`/`gates`) |
+
+**Two jobs, one engine.** *review* makes code review on a large repo a focused
+few-minute pass; *context* gives an AI agent a verified, ~96%-smaller slice of the
+architecture instead of the whole repo. See [`VISION.md`](VISION.md) and the
+[use-case walkthroughs](https://haider1998.github.io/pyvisualizer/use-cases/).
+
+## Use cases (real commands, real output)
+
+Three end-to-end walkthroughs, each backed by a runnable fixture in
+[`examples/scenarios/`](examples/scenarios) — every command and every line of
+output is reproducible, nothing is staged:
+
+- 🗺️ **[The orphan monolith](https://haider1998.github.io/pyvisualizer/use-cases/orphan-monolith.html)** —
+  onboard onto an undocumented codebase with `visualize` + `health` + `check --dead-code`.
+- 🛡️ **[The audit deadline](https://haider1998.github.io/pyvisualizer/use-cases/soc2-audit.html)** —
+  enforce layering rules at the call-graph level and produce dated SOC 2 evidence.
+- 🧨 **[The fearless refactor](https://haider1998.github.io/pyvisualizer/use-cases/fearless-refactor.html)** —
+  `impact` blast radius, then a `diff` gate that fails a PR on a new cycle.
+
+See the [full use-case index + a recipe for every command](https://haider1998.github.io/pyvisualizer/use-cases/).
+
+**Measured** (reproduce with `python benchmarks/bench.py` → [`docs/benchmarks.json`](docs/benchmarks.json)):
+a **98,669-line** project maps to a full call graph in **~4.9 s** (26,658 functions),
+**100%** of edges carry `file:line`, output is **byte-identical** across runs, and the
+generated HTML makes **0** network requests. *(macOS arm64, Python 3.14; speed is
+hardware-dependent — provenance, determinism, and zero-network are structural.)*
 
 ## The interactive map
 

@@ -60,6 +60,9 @@ class Config:
     detail: str = "module"  # module | class | function
     strict: bool = False
     project_name: Optional[str] = None
+    # Automations the user opted into via ``init`` (review/readme/context/gates).
+    # Recorded so future runs and future features respect the choice.
+    features: List[str] = field(default_factory=list)
     rules: Rules = field(default_factory=Rules)
 
     @classmethod
@@ -78,6 +81,7 @@ class Config:
             detail=str(data.get("detail", "module")),
             strict=bool(data.get("strict", False)),
             project_name=data.get("project_name"),
+            features=list(data.get("features", [])),
             rules=rules,
         )
 

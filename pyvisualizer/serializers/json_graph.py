@@ -124,20 +124,39 @@ def graph_to_dict(
             }
         )
 
-    return {
+    out: Dict[str, Any] = {
         "schema": SCHEMA_ID,
         "generated_with": "py-code-visualizer",
         "tool_version": tool_version,
         "project": project_name,
-        "stats": {
-            "nodes": len(nodes),
-            "edges": len(edges),
-            "cycles": cycles,
-            "ambiguous_edges": ambiguous,
-        },
-        "nodes": nodes,
-        "edges": edges,
     }
+    # Optional repo block: when the project has a detectable git remote, every
+    # file:line can become a clickable web link (blob/HEAD, never a SHA, so the
+    # output stays deterministic). Absent when there is no remote — nothing else
+    # depends on its presence.
+    repo_url = _detect_repo_url(project_root)
+    if repo_url:
+        out["repo"] = {"url": repo_url, "link_ref": "HEAD"}
+    out["stats"] = {
+        "nodes": len(nodes),
+        "edges": len(edges),
+        "cycles": cycles,
+        "ambiguous_edges": ambiguous,
+    }
+    out["nodes"] = nodes
+    out["edges"] = edges
+    return out
+
+
+def _detect_repo_url(project_root: Optional[str]) -> str:
+    if not project_root:
+        return ""
+    try:
+        from pyvisualizer.changes import repo_web_url
+
+        return repo_web_url(project_root)
+    except Exception:  # pragma: no cover - defensive
+        return ""
 
 
 def graph_to_json(

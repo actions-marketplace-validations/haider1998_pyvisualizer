@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import json
 import os
-from typing import Dict, List
+from typing import Dict, List, Tuple
 
 import networkx as nx
 
@@ -104,16 +104,13 @@ def build_ai_markdown(result: GraphResult, tool_version: str = "") -> str:
     return "\n".join(lines)
 
 
-def export_for_ai(
-    result: GraphResult,
-    out_dir: str = ".",
-    tool_version: str = "",
-) -> Dict[str, str]:
-    """Write ARCHITECTURE.json and ARCHITECTURE.md; return the paths written."""
-    os.makedirs(out_dir, exist_ok=True)
-    json_path = os.path.join(out_dir, "ARCHITECTURE.json")
-    md_path = os.path.join(out_dir, "ARCHITECTURE.md")
+# Markers for the py-code-visualizer section injected into AGENTS.md — distinct
+# from the readme diagram markers so the two never collide.
+AGENTS_START = "<!-- pyvisualizer:agents:start -->"
+AGENTS_END = "<!-- pyvisualizer:agents:end -->"
 
+
+def _json_content(result: GraphResult, tool_version: str = "") -> str:
     data = graph_to_dict(
         result.graph,
         project_name=result.project_name,
@@ -121,10 +118,96 @@ def export_for_ai(
         tool_version=tool_version,
     )
     data["health"] = compute_health(result.graph).to_dict()
-    with open(json_path, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2, ensure_ascii=False)
+    return json.dumps(data, indent=2, ensure_ascii=False)
 
+
+def build_agents_block() -> str:
+    """The marker-delimited section telling any agent to use the ground truth."""
+    body = [
+        AGENTS_START,
+        "## Architecture ground truth (py-code-visualizer)",
+        "",
+        "This repository ships a **verified, deterministic call graph**. Prefer it",
+        "over re-deriving architecture from raw source — it is parsed from the AST,",
+        "so every relationship is real and carries `file:line` provenance.",
+        "",
+        "- **Structure / who-calls-what:** read `ARCHITECTURE.json` (and",
+        "  `ARCHITECTURE.md` for a summary) before reasoning about the codebase.",
+        "- **Task-scoped facts:** run",
+        "  `py-code-visualizer context --focus <files-or-functions>` (or",
+        "  `--from-git <base>`) to get a small, verified pack of just the functions",
+        "  your task touches, their callers/callees, and any cycles — far fewer",
+        "  tokens than reading the whole repo.",
+        "- Ambiguous calls are flagged, never guessed; trust the confidence field.",
+        AGENTS_END,
+    ]
+    return "\n".join(body)
+
+
+def _agents_md_plan(out_dir: str) -> Tuple[str, str, bool]:
+    """Return ``(path, new_content, changed)`` for the AGENTS.md injection."""
+    from pyvisualizer.inject import inject_block
+
+    path = os.path.join(out_dir, "AGENTS.md")
+    existing = ""
+    if os.path.exists(path):
+        with open(path, "r", encoding="utf-8") as f:
+            existing = f.read()
+    new_content, changed = inject_block(
+        existing,
+        build_agents_block(),
+        start_marker=AGENTS_START,
+        end_marker=AGENTS_END,
+        section_title="# Agent instructions",
+    )
+    return path, new_content, changed
+
+
+def export_for_ai(
+    result: GraphResult,
+    out_dir: str = ".",
+    tool_version: str = "",
+    agents_md: bool = True,
+) -> Dict[str, str]:
+    """Write ARCHITECTURE.json/.md (+ AGENTS.md section); return paths written."""
+    os.makedirs(out_dir, exist_ok=True)
+    json_path = os.path.join(out_dir, "ARCHITECTURE.json")
+    md_path = os.path.join(out_dir, "ARCHITECTURE.md")
+
+    with open(json_path, "w", encoding="utf-8") as f:
+        f.write(_json_content(result, tool_version))
     with open(md_path, "w", encoding="utf-8") as f:
         f.write(build_ai_markdown(result, tool_version))
 
-    return {"json": json_path, "markdown": md_path}
+    written = {"json": json_path, "markdown": md_path}
+    if agents_md:
+        agents_path, new_content, changed = _agents_md_plan(out_dir)
+        if changed:
+            with open(agents_path, "w", encoding="utf-8") as f:
+                f.write(new_content)
+        written["agents"] = agents_path
+    return written
+
+
+def export_would_change(
+    result: GraphResult,
+    out_dir: str = ".",
+    tool_version: str = "",
+    agents_md: bool = True,
+) -> bool:
+    """True if writing the export now would change any file (CI freshness gate)."""
+    checks = [
+        (os.path.join(out_dir, "ARCHITECTURE.json"), _json_content(result, tool_version)),
+        (os.path.join(out_dir, "ARCHITECTURE.md"), build_ai_markdown(result, tool_version)),
+    ]
+    for path, expected in checks:
+        if not os.path.exists(path):
+            return True
+        with open(path, "r", encoding="utf-8") as f:
+            if f.read() != expected:
+                return True
+    if agents_md:
+        _, _, changed = _agents_md_plan(out_dir)
+        if changed:
+            return True
+    return False

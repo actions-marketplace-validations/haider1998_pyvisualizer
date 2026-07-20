@@ -1,0 +1,176 @@
+/* Shared styling for the use-case walkthrough pages.
+   Layered on top of ../style.css (which provides tokens, nav, footer, buttons). */
+
+.uc-hero {
+    padding: 7rem 0 3rem;
+    text-align: center;
+}
+.uc-hero .section-badge { margin-bottom: 1rem; }
+.uc-hero h1 {
+    font-size: clamp(2rem, 5vw, 3rem);
+    line-height: 1.1;
+    margin: 0 0 1rem;
+}
+.uc-hero p.lead {
+    max-width: 680px;
+    margin: 0 auto;
+    font-size: 1.2rem;
+    line-height: 1.7;
+    opacity: .85;
+}
+.uc-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: .6rem;
+    justify-content: center;
+    margin: 1.75rem 0 0;
+}
+.uc-tag {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: .8rem;
+    padding: .35rem .7rem;
+    border-radius: 999px;
+    border: 1px solid rgba(128,128,128,.28);
+    background: rgba(124,58,237,.06);
+}
+.uc-body {
+    max-width: 820px;
+    margin: 0 auto;
+    padding: 1rem 0 4rem;
+    line-height: 1.75;
+}
+.uc-body h2 {
+    font-size: 1.7rem;
+    margin: 3rem 0 1rem;
+    scroll-margin-top: 90px;
+}
+.uc-body h3 { font-size: 1.2rem; margin: 2rem 0 .6rem; }
+.uc-body p { margin: 0 0 1.1rem; opacity: .92; }
+.uc-body ul, .uc-body ol { margin: 0 0 1.2rem 1.3rem; line-height: 1.9; }
+.uc-body code {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: .88em;
+    padding: .12em .42em;
+    border-radius: 5px;
+    background: rgba(128,128,128,.16);
+}
+
+.uc-step {
+    border: 1px solid rgba(128,128,128,.2);
+    border-radius: 14px;
+    padding: 1.4rem 1.6rem;
+    margin: 1.5rem 0;
+    background: rgba(128,128,128,.04);
+}
+.uc-step .step-num {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.9rem; height: 1.9rem;
+    border-radius: 50%;
+    background: var(--primary, #7c3aed);
+    color: #fff; font-weight: 700; font-size: .95rem;
+    margin-right: .6rem;
+}
+.uc-step h3 { display: inline; margin: 0; font-size: 1.15rem; }
+
+.uc-cmd, .uc-out {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: .84rem;
+    line-height: 1.55;
+    border-radius: 10px;
+    padding: 1rem 1.15rem;
+    overflow-x: auto;
+    margin: 1rem 0;
+    white-space: pre;
+}
+.uc-cmd {
+    background: #0d1117;
+    color: #e6edf3;
+    border: 1px solid #30363d;
+}
+.uc-cmd .p { color: #7c3aed; }
+.uc-out {
+    background: rgba(128,128,128,.08);
+    border: 1px solid rgba(128,128,128,.22);
+    color: inherit;
+}
+.uc-out .ok { color: #3fb950; font-weight: 600; }
+.uc-out .bad { color: #f85149; font-weight: 600; }
+.uc-out .warn { color: #d29922; font-weight: 600; }
+.uc-label {
+    font-size: .72rem;
+    text-transform: uppercase;
+    letter-spacing: .08em;
+    opacity: .6;
+    margin: 1.3rem 0 -.3rem;
+    font-weight: 700;
+}
+.uc-benefit {
+    border-left: 3px solid #3fb950;
+    background: rgba(63,185,80,.07);
+    padding: 1.1rem 1.4rem;
+    border-radius: 0 12px 12px 0;
+    margin: 1.5rem 0;
+}
+.uc-benefit strong { color: #3fb950; }
+.uc-note {
+    font-size: .85rem;
+    opacity: .7;
+    border-top: 1px dashed rgba(128,128,128,.3);
+    padding-top: 1rem;
+    margin-top: 2.5rem;
+}
+.uc-nav-back {
+    display: inline-block;
+    margin: 1.5rem 0 0;
+    font-weight: 600;
+    opacity: .8;
+}
+.uc-cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 1.25rem;
+    margin: 2rem 0;
+}
+.uc-card {
+    border: 1px solid rgba(128,128,128,.22);
+    border-radius: 16px;
+    padding: 1.5rem;
+    text-decoration: none;
+    color: inherit;
+    display: block;
+    transition: transform .15s ease, border-color .15s ease;
+}
+.uc-card:hover { transform: translateY(-3px); border-color: var(--primary, #7c3aed); }
+.uc-card .uc-card-icon { font-size: 1.8rem; }
+.uc-card h3 { margin: .6rem 0 .4rem; font-size: 1.15rem; }
+.uc-card p { font-size: .92rem; opacity: .8; margin: 0; }
+.uc-card .uc-card-cmds { margin-top: .8rem; }
+.uc-card code {
+    display: inline-block;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: .78rem;
+    padding: .1em .4em;
+    border-radius: 4px;
+    background: rgba(128,128,128,.16);
+}
+.uc-proof-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 1rem;
+    margin: 1.5rem 0;
+}
+.uc-proof {
+    border: 1px solid rgba(128,128,128,.22);
+    border-radius: 14px;
+    padding: 1.2rem 1rem;
+    text-align: center;
+}
+.uc-proof .num {
+    font-size: 1.8rem;
+    font-weight: 800;
+    font-family: 'JetBrains Mono', monospace;
+    color: var(--primary, #7c3aed);
+}
+.uc-proof .lbl { font-size: .8rem; opacity: .75; margin-top: .3rem; }

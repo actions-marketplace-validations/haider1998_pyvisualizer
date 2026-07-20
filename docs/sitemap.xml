@@ -12,4 +12,40 @@
         <changefreq>monthly</changefreq>
         <priority>0.8</priority>
     </url>
+    <url>
+        <loc>https://haider1998.github.io/pyvisualizer/use-cases/</loc>
+        <lastmod>2026-07-20</lastmod>
+        <changefreq>monthly</changefreq>
+        <priority>0.9</priority>
+    </url>
+    <url>
+        <loc>https://haider1998.github.io/pyvisualizer/use-cases/review-a-pr.html</loc>
+        <lastmod>2026-07-20</lastmod>
+        <changefreq>monthly</changefreq>
+        <priority>0.9</priority>
+    </url>
+    <url>
+        <loc>https://haider1998.github.io/pyvisualizer/use-cases/agent-context.html</loc>
+        <lastmod>2026-07-20</lastmod>
+        <changefreq>monthly</changefreq>
+        <priority>0.9</priority>
+    </url>
+    <url>
+        <loc>https://haider1998.github.io/pyvisualizer/use-cases/orphan-monolith.html</loc>
+        <lastmod>2026-07-20</lastmod>
+        <changefreq>monthly</changefreq>
+        <priority>0.8</priority>
+    </url>
+    <url>
+        <loc>https://haider1998.github.io/pyvisualizer/use-cases/soc2-audit.html</loc>
+        <lastmod>2026-07-20</lastmod>
+        <changefreq>monthly</changefreq>
+        <priority>0.8</priority>
+    </url>
+    <url>
+        <loc>https://haider1998.github.io/pyvisualizer/use-cases/fearless-refactor.html</loc>
+        <lastmod>2026-07-20</lastmod>
+        <changefreq>monthly</changefreq>
+        <priority>0.8</priority>
+    </url>
 </urlset>

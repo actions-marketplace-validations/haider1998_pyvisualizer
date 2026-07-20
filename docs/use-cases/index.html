@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Use cases — py-code-visualizer (real commands, real output)</title>
+    <meta name="description"
+        content="End-to-end use cases for py-code-visualizer: map an undocumented monolith, produce SOC 2 architecture evidence, gate a risky refactor, plus a recipe for every subcommand — each backed by a runnable fixture.">
+    <link rel="canonical" href="https://haider1998.github.io/pyvisualizer/use-cases/">
+    <link rel="stylesheet" href="../style.css">
+    <link rel="stylesheet" href="_uc.css">
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "ItemList",
+      "name": "py-code-visualizer use cases",
+      "description": "End-to-end, fixture-backed workflows for deterministic Python architecture analysis.",
+      "itemListElement": [
+        { "@type": "ListItem", "position": 1, "name": "Review a large-repo PR in minutes", "url": "https://haider1998.github.io/pyvisualizer/use-cases/review-a-pr.html" },
+        { "@type": "ListItem", "position": 2, "name": "Feed your AI agent verified context", "url": "https://haider1998.github.io/pyvisualizer/use-cases/agent-context.html" },
+        { "@type": "ListItem", "position": 3, "name": "Map an undocumented Python monolith", "url": "https://haider1998.github.io/pyvisualizer/use-cases/orphan-monolith.html" },
+        { "@type": "ListItem", "position": 4, "name": "Architecture evidence for a SOC 2 audit", "url": "https://haider1998.github.io/pyvisualizer/use-cases/soc2-audit.html" },
+        { "@type": "ListItem", "position": 5, "name": "Blast radius of a Python refactor", "url": "https://haider1998.github.io/pyvisualizer/use-cases/fearless-refactor.html" }
+      ]
+    }
+    </script>
+</head>
+<body>
+    <nav class="nav" id="nav">
+        <div class="nav-container">
+            <a href="../index.html" class="nav-logo">
+                <img src="../images/PyVizualizer_Logo.png" alt="py-code-visualizer" class="logo-img">
+            </a>
+            <ul class="nav-menu">
+                <li><a href="../index.html" class="nav-link">Home</a></li>
+                <li><a href="../playground.html" class="nav-link">Playground</a></li>
+                <li><a href="https://github.com/haider1998/PyVisualizer" class="nav-github">GitHub</a></li>
+            </ul>
+        </div>
+    </nav>
+
+    <header class="uc-hero">
+        <div class="container">
+            <span class="section-badge">Use cases</span>
+            <h1>What you can actually do with it</h1>
+            <p class="lead">Three high-stakes walkthroughs and a recipe for every command — each one
+                backed by a runnable fixture in the repo, so every command and every line of output is
+                real. Nothing here is staged.</p>
+        </div>
+    </header>
+
+    <main class="uc-body container">
+        <h2 style="margin-top:1rem">Hero workflows</h2>
+        <p style="opacity:.8;margin-top:-.5rem">The two jobs this tool exists for — <strong>faster code
+            review</strong> and <strong>verified context for AI agents</strong> — plus the classics.</p>
+        <div class="uc-cards">
+            <a class="uc-card" href="review-a-pr.html">
+                <div class="uc-card-icon">🔍</div>
+                <h3>Review a PR in minutes</h3>
+                <p>Turn a big diff into a focused map: what changed, the blast radius, risk flags, and a
+                    clickable <code>file:line</code> on every reference.</p>
+                <div class="uc-card-cmds"><code>review --base</code> <code>init --with review</code></div>
+            </a>
+            <a class="uc-card" href="agent-context.html">
+                <div class="uc-card-icon">🤖</div>
+                <h3>Feed your agent the right context</h3>
+                <p>A verified, task-scoped context pack — ~96% fewer tokens than the whole repo, zero
+                    guessed edges — plus AGENTS.md wiring.</p>
+                <div class="uc-card-cmds"><code>context --focus</code> <code>export --for-ai</code></div>
+            </a>
+            <a class="uc-card" href="orphan-monolith.html">
+                <div class="uc-card-icon">🗺️</div>
+                <h3>The orphan monolith</h3>
+                <p>Inherit an undocumented codebase and get a trustworthy map, a health grade, and a
+                    dead-code list in three commands.</p>
+                <div class="uc-card-cmds"><code>visualize</code> <code>health</code> <code>check --dead-code</code></div>
+            </a>
+            <a class="uc-card" href="soc2-audit.html">
+                <div class="uc-card-icon">🛡️</div>
+                <h3>The audit deadline</h3>
+                <p>Turn a layering policy into an enforced, call-graph-level control and commit
+                    deterministic diagrams as dated audit evidence.</p>
+                <div class="uc-card-cmds"><code>check --layers --forbid</code> <code>visualize</code></div>
+            </a>
+            <a class="uc-card" href="fearless-refactor.html">
+                <div class="uc-card-icon">🧨</div>
+                <h3>The fearless refactor</h3>
+                <p>Measure a change's blast radius before you make it, then fail the PR when a refactor
+                    introduces a new circular dependency.</p>
+                <div class="uc-card-cmds"><code>impact</code> <code>json</code> <code>diff --fail-on-new-cycles</code></div>
+            </a>
+        </div>
+
+        <h2>A recipe for every command</h2>
+        <p>All eight subcommands build on the same deterministic graph. Each recipe below is a
+            copy-paste starting point; run <code>py-code-visualizer &lt;command&gt; --help</code> for
+            the full flag set.</p>
+
+        <h3>🔍 <code>review</code> — a PR review report</h3>
+        <p>Detect the functions changed vs a base ref, compute their blast radius, flag risks (hubs,
+            new cycles, ambiguous calls near the change), and emit a focused report with a clickable
+            <code>file:line</code> on every reference. → <a href="review-a-pr.html">Full walkthrough</a>.</p>
+        <div class="uc-cmd"><span class="p">$</span> py-code-visualizer review . --base origin/main
+<span class="p">$</span> py-code-visualizer review . --base origin/main --fail-above 50   <span style="opacity:.5"># optional policy</span></div>
+
+        <h3>🤖 <code>context</code> — verified context pack for AI agents</h3>
+        <p>A small, task-scoped slice of the architecture centered on the functions you name (or the
+            ones changed vs a git ref), selected under a token budget by personalized PageRank. →
+            <a href="agent-context.html">Full walkthrough</a>.</p>
+        <div class="uc-cmd"><span class="p">$</span> py-code-visualizer context . --focus your_pkg.core.save --budget-tokens 4000
+<span class="p">$</span> py-code-visualizer context . --from-git origin/main   <span style="opacity:.5"># focus on the PR's changes</span></div>
+
+        <h3>🧰 <code>init</code> — set up only the automation you want</h3>
+        <p>Opt in to exactly the profiles you need — review, readme, context, or gates — and nothing
+            else. Generates the CI workflow(s), never overwrites files without <code>--force</code>,
+            and records your choice in <code>pyproject.toml</code>.</p>
+        <div class="uc-cmd"><span class="p">$</span> py-code-visualizer init --list                    <span style="opacity:.5"># see profiles; writes nothing</span>
+<span class="p">$</span> py-code-visualizer init --with review,context     <span style="opacity:.5"># generate just these</span></div>
+
+        <h3>🎨 <code>visualize</code> — a self-contained interactive map</h3>
+        <p>Render the call graph as one HTML file (no CDN, works offline), or as Mermaid, JSON, C4, or
+            SVG/PNG. Click any edge to see its <code>file:line</code>.</p>
+        <div class="uc-cmd"><span class="p">$</span> py-code-visualizer visualize ./your_project -o architecture.html
+<span class="p">$</span> py-code-visualizer visualize ./your_project -f mermaid   <span style="opacity:.5"># GitHub-safe diagram</span>
+<span class="p">$</span> py-code-visualizer visualize ./your_project --churn        <span style="opacity:.5"># git heatmap overlay</span></div>
+
+        <h3>📝 <code>readme</code> — a self-healing diagram in your docs</h3>
+        <p>Inject or update a Mermaid diagram between marker comments in any Markdown file. Deterministic,
+            so a CI bot commits <em>only</em> when the architecture actually changed — no phantom diffs.
+            Use <code>--check</code> as a drift gate.</p>
+        <div class="uc-cmd"><span class="p">$</span> py-code-visualizer readme ./your_project            <span style="opacity:.5"># updates README.md in place</span>
+<span class="p">$</span> py-code-visualizer readme ./your_project --check    <span style="opacity:.5"># exit 1 if it would change</span></div>
+
+        <h3>🧾 <code>json</code> — the canonical, diffable graph</h3>
+        <p>Emit the schema <code>pyvisualizer/graph@1</code> — the substrate for <code>diff</code>,
+            <code>check</code>, <code>impact</code>, and AI tools. Relative paths, sorted, byte-identical
+            across runs.</p>
+        <div class="uc-cmd"><span class="p">$</span> py-code-visualizer json ./your_project -o graph.json</div>
+
+        <h3>🔀 <code>diff</code> — a PR-ready change report</h3>
+        <p>Compare two JSON snapshots: added/removed functions and edges, new cycles, health delta.
+            <code>--fail-on-new-cycles</code> makes it a gate. → <a href="fearless-refactor.html">Full
+            walkthrough</a>.</p>
+        <div class="uc-cmd"><span class="p">$</span> py-code-visualizer diff base.json head.json --fail-on-new-cycles</div>
+
+        <h3>🚦 <code>check</code> — architecture-as-code gates</h3>
+        <p>Enforce layering rules and cycle-freedom at the call-graph level (stricter than an import
+            linter). Add <code>--dead-code</code> for an unreachable-function review list. →
+            <a href="soc2-audit.html">Full walkthrough</a>.</p>
+        <div class="uc-cmd"><span class="p">$</span> py-code-visualizer check ./your_project --fail-on-cycles
+<span class="p">$</span> py-code-visualizer check ./your_project --layers api domain infra --forbid <span style="color:#79c0ff">'domain -> api'</span>
+<span class="p">$</span> py-code-visualizer check ./your_project --dead-code</div>
+
+        <h3>💥 <code>impact</code> — blast radius before you refactor</h3>
+        <p>Transitive callers and callees of a function, and how many modules they touch. →
+            <a href="fearless-refactor.html">Full walkthrough</a>.</p>
+        <div class="uc-cmd"><span class="p">$</span> py-code-visualizer impact your_pkg.core.save ./your_project</div>
+
+        <h3>🏥 <code>health</code> — an A–F architecture grade</h3>
+        <p>Score coupling, cycles, hub risk, orphans, and ambiguity into one defensible grade, with an
+            optional SVG badge for your README. → <a href="orphan-monolith.html">Full walkthrough</a>.</p>
+        <div class="uc-cmd"><span class="p">$</span> py-code-visualizer health ./your_project
+<span class="p">$</span> py-code-visualizer health ./your_project --badge health.svg</div>
+
+        <h3>🤖 <code>export</code> — ground truth for your AI tools</h3>
+        <p>Emit <code>ARCHITECTURE.json</code> + <code>ARCHITECTURE.md</code> so Cursor/Claude/Copilot
+            ingest a verified graph instead of re-deriving structure (wrongly) from raw source. Point
+            your agent at the graph, not the repo.</p>
+        <div class="uc-cmd"><span class="p">$</span> py-code-visualizer export --for-ai ./your_project</div>
+
+        <div class="uc-benefit">
+            <p style="margin:0"><strong>The through-line.</strong> Every command reads the same
+                deterministic, AST-verified graph where every edge carries a <code>file:line</code> and
+                ambiguous calls are flagged, never guessed. That's why the output can live in CI, in your
+                README, in a PR gate, and in an audit trail at the same time.</p>
+        </div>
+
+        <a href="../index.html" class="uc-nav-back">← Back to home</a>
+    </main>
+
+    <footer class="footer">
+        <div class="container">
+            <p style="text-align:center;opacity:.7;padding:2rem 0">
+                Deterministic, AST-verified architecture ground truth ·
+                <a href="https://github.com/haider1998/PyVisualizer">py-code-visualizer</a> · MIT
+            </p>
+        </div>
+    </footer>
+    <script src="../script.js"></script>
+</body>
+</html>

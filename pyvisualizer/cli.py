@@ -32,7 +32,19 @@ logging.basicConfig(
 )
 logger = logging.getLogger("pyvisualizer")
 
-_SUBCOMMANDS = {"visualize", "readme", "json", "diff", "check", "impact", "export", "health"}
+_SUBCOMMANDS = {
+    "visualize",
+    "readme",
+    "json",
+    "diff",
+    "check",
+    "impact",
+    "export",
+    "health",
+    "review",
+    "context",
+    "init",
+}
 
 
 # --------------------------------------------------------------------------- #
@@ -95,6 +107,11 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Exit non-zero if the file would change (CI drift gate)",
     )
+    pr.add_argument(
+        "--no-links",
+        action="store_true",
+        help="Omit the collapsed 'Jump to source' index below the diagram",
+    )
     _common(pr)
     pr.set_defaults(func=cmd_readme)
 
@@ -134,6 +151,9 @@ def _build_parser() -> argparse.ArgumentParser:
     pi = sub.add_parser("impact", help="Blast-radius analysis for a function")
     pi.add_argument("target", help="Function (short or qualified name)")
     pi.add_argument("path", nargs="?", default=".", help="Project path")
+    pi.add_argument(
+        "--format", "-f", choices=["text", "markdown"], default="text", help="Output format"
+    )
     _common(pi)
     pi.set_defaults(func=cmd_impact)
 
@@ -160,8 +180,64 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Emit ARCHITECTURE.json + ARCHITECTURE.md",
     )
     pe.add_argument("--out-dir", "-o", default=".", help="Output directory")
+    pe.add_argument(
+        "--no-agents-md",
+        action="store_true",
+        help="Do not add a py-code-visualizer section to AGENTS.md",
+    )
+    pe.add_argument(
+        "--check",
+        action="store_true",
+        help="Exit non-zero if the exported files would change (CI freshness gate)",
+    )
     _common(pe)
     pe.set_defaults(func=cmd_export)
+
+    # review --------------------------------------------------------------
+    prv = sub.add_parser("review", help="PR review report: what changed + blast radius")
+    prv.add_argument("path", nargs="?", default=".", help="Project path")
+    prv.add_argument("--base", help="Base git ref to diff against (default: auto-detect)")
+    prv.add_argument(
+        "--format", "-f", choices=["markdown", "text"], default="markdown", help="Output format"
+    )
+    prv.add_argument("--output", "-o", help="Output file (default: stdout)")
+    prv.add_argument(
+        "--fail-above",
+        type=int,
+        help="Exit non-zero if the blast radius exceeds this many callers (policy, off by default)",
+    )
+    _common(prv)
+    prv.set_defaults(func=cmd_review)
+
+    # context -------------------------------------------------------------
+    pctx = sub.add_parser("context", help="Task-scoped verified context pack for AI agents")
+    pctx.add_argument("path", nargs="?", default=".", help="Project path")
+    pctx.add_argument("--focus", nargs="+", help="Function/class/file names to center the pack on")
+    pctx.add_argument("--from-git", dest="from_git", help="Center on functions changed vs this ref")
+    pctx.add_argument(
+        "--budget-tokens", type=int, default=4000, help="Approx token budget for the pack"
+    )
+    pctx.add_argument("--output", "-o", help="Markdown output file (default: stdout)")
+    pctx.add_argument("--json", dest="json_out", help="Also write the machine-readable pack JSON")
+    _common(pctx)
+    pctx.set_defaults(func=cmd_context)
+
+    # init ----------------------------------------------------------------
+    pin = sub.add_parser("init", help="Set up only the automation you want (opt-in)")
+    pin.add_argument("path", nargs="?", default=".", help="Project path")
+    pin.add_argument(
+        "--with",
+        dest="features",
+        help="Comma-separated: review,readme,context,gates (skips the prompt)",
+    )
+    pin.add_argument(
+        "--ci", choices=["github", "gitlab", "none"], default="github", help="CI provider"
+    )
+    pin.add_argument(
+        "--list", action="store_true", help="Show what each profile creates; write nothing"
+    )
+    pin.add_argument("--force", action="store_true", help="Overwrite existing generated files")
+    pin.set_defaults(func=cmd_init)
 
     return parser
 
@@ -190,16 +266,20 @@ def main(args: Optional[list] = None) -> int:
 # --------------------------------------------------------------------------- #
 # Subcommand handlers
 # --------------------------------------------------------------------------- #
-def _build(args: argparse.Namespace) -> "GraphResult":
+def _build(args: argparse.Namespace, *, full: bool = False) -> "GraphResult":
     from pyvisualizer.api import build_graph
 
+    # Analysis commands (review, context) must see the whole graph — trimming to
+    # ``max_nodes`` is a visualization concern and would silently drop the very
+    # functions being analyzed, breaking blast radius and focus resolution.
+    max_nodes = None if full else getattr(args, "max_nodes", None)
     return build_graph(
         args.path,
         modules=getattr(args, "modules", None),
         exclude=getattr(args, "exclude", None),
         entry=getattr(args, "entry", None),
         depth=getattr(args, "depth", None),
-        max_nodes=getattr(args, "max_nodes", None),
+        max_nodes=max_nodes,
         strict=getattr(args, "strict", False),
         project_name=getattr(args, "project_name", None),
     )
@@ -328,6 +408,39 @@ def _render_graphviz(G: "nx.DiGraph", output: str, project_name: str, fmt: str) 
     logger.info("%s saved to %s.%s", fmt.upper(), output, fmt)
 
 
+def _source_index_markdown(G: "nx.DiGraph", base_dir: str) -> str:
+    """A collapsed <details> index of every function as a relative source link.
+
+    Relative markdown links (``pkg/mod.py#L42``) resolve natively on GitHub when
+    the diagram lives in a README, giving reviewers one-click jump-to-source with
+    no absolute URLs and no dependence on a remote. Deterministic (sorted).
+    """
+    rows: List[str] = []
+    for node in sorted(G.nodes()):
+        data = G.nodes[node]
+        path = data.get("path", "")
+        lineno = int(data.get("lineno", 0) or 0)
+        if not path:
+            continue
+        try:
+            rel = os.path.relpath(os.path.realpath(path), os.path.realpath(base_dir)).replace(
+                os.sep, "/"
+            )
+        except ValueError:
+            continue
+        anchor = f"#L{lineno}" if lineno else ""
+        rows.append(f"- [`{node}`]({rel}{anchor})")
+    if not rows:
+        return ""
+    return (
+        "<details>\n<summary>📍 Jump to source ("
+        + str(len(rows))
+        + " functions)</summary>\n\n"
+        + "\n".join(rows)
+        + "\n</details>"
+    )
+
+
 def cmd_readme(args: argparse.Namespace) -> int:
     from pyvisualizer.config import load_config
     from pyvisualizer.inject import inject, update_file
@@ -375,6 +488,11 @@ def cmd_readme(args: argparse.Namespace) -> int:
             target,
         )
     )
+
+    if not getattr(args, "no_links", False):
+        index = _source_index_markdown(G, os.path.dirname(target_path))
+        if index:
+            footer = footer + "\n\n" + index
 
     if getattr(args, "check", False):
         existing = ""
@@ -513,21 +631,98 @@ def cmd_health(args: argparse.Namespace) -> int:
 
 
 def cmd_export(args: argparse.Namespace) -> int:
-    from pyvisualizer.export import export_for_ai
+    from pyvisualizer.export import export_for_ai, export_would_change
 
-    result = _build(args)
-    paths = export_for_ai(result, out_dir=args.out_dir, tool_version=__version__)
-    logger.info("Wrote %s and %s", paths["json"], paths["markdown"])
+    result = _build(args, full=True)
+    agents_md = not getattr(args, "no_agents_md", False)
+    if getattr(args, "check", False):
+        changed = export_would_change(
+            result, out_dir=args.out_dir, tool_version=__version__, agents_md=agents_md
+        )
+        if changed:
+            logger.error("AI export is stale — run `py-code-visualizer export` to refresh.")
+            return 1
+        logger.info("AI export is up to date.")
+        return 0
+    paths = export_for_ai(
+        result, out_dir=args.out_dir, tool_version=__version__, agents_md=agents_md
+    )
+    extra = f" and {paths['agents']}" if "agents" in paths else ""
+    logger.info("Wrote %s, %s%s", paths["json"], paths["markdown"], extra)
     return 0
 
 
 def cmd_impact(args: argparse.Namespace) -> int:
-    from pyvisualizer.impact import analyze_impact, render_text
+    from pyvisualizer.impact import analyze_impact, render_markdown, render_text
 
-    result = _build(args)
+    result = _build(args, full=True)
     impact = analyze_impact(result.graph, args.target)
-    print(render_text(impact))
+    if getattr(args, "format", "text") == "markdown":
+        print(render_markdown(impact, result.graph, result.project_root))
+    else:
+        print(render_text(impact))
     return 0 if impact.found else 1
+
+
+def cmd_review(args: argparse.Namespace) -> int:
+    from pyvisualizer.review import analyze_review, render_markdown, render_text
+
+    result = _build(args, full=True)
+    review = analyze_review(result.graph, result.project_root, base_ref=args.base)
+    if args.format == "markdown":
+        report = render_markdown(review, result.graph, result.project_root)
+    else:
+        report = render_text(review, result.graph, result.project_root)
+
+    if args.output:
+        with open(args.output, "w", encoding="utf-8") as f:
+            f.write(report + "\n")
+        logger.info("Review report written to %s", args.output)
+    else:
+        print(report)
+
+    if args.fail_above is not None and review.blast_radius > args.fail_above:
+        logger.error(
+            "Blast radius %d exceeds --fail-above %d", review.blast_radius, args.fail_above
+        )
+        return 1
+    return 0
+
+
+def cmd_context(args: argparse.Namespace) -> int:
+    from pyvisualizer.context import build_context_pack, render_pack_json, render_pack_markdown
+
+    result = _build(args, full=True)
+    pack = build_context_pack(
+        result,
+        focus=getattr(args, "focus", None),
+        from_git=getattr(args, "from_git", None),
+        budget_tokens=args.budget_tokens,
+    )
+    markdown = render_pack_markdown(pack)
+    if args.output:
+        with open(args.output, "w", encoding="utf-8") as f:
+            f.write(markdown + "\n")
+        logger.info("Context pack written to %s", args.output)
+    else:
+        print(markdown)
+    if getattr(args, "json_out", None):
+        with open(args.json_out, "w", encoding="utf-8") as f:
+            f.write(render_pack_json(pack))
+        logger.info("Context pack JSON written to %s", args.json_out)
+    return 0
+
+
+def cmd_init(args: argparse.Namespace) -> int:
+    from pyvisualizer.setup_init import run_init
+
+    return run_init(
+        args.path,
+        features=getattr(args, "features", None),
+        ci=args.ci,
+        list_only=args.list,
+        force=args.force,
+    )
 
 
 if __name__ == "__main__":

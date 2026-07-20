@@ -113,6 +113,11 @@ button.on{background:var(--accent);border-color:var(--accent);color:#fff}
 #inspector .row{margin:6px 0;color:var(--muted)}
 #inspector .row b{color:var(--text);font-weight:600}
 #inspector code{background:var(--panel2);padding:1px 5px;border-radius:4px;font-size:11.5px}
+#inspector .srcbtn{background:var(--panel2);border:1px solid var(--border);border-radius:4px;
+  color:var(--text);cursor:pointer;font-size:11px;padding:0 5px;line-height:1.5}
+#inspector .srcbtn:hover{border-color:var(--accent2)}
+#inspector .srclink{color:var(--accent2);text-decoration:none;font-size:11.5px;margin-left:4px}
+#inspector .srclink:hover{text-decoration:underline}
 #inspector ul{margin:4px 0 10px;padding-left:0;list-style:none}
 #inspector li{padding:3px 6px;border-radius:5px;cursor:pointer;color:var(--text);
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -372,14 +377,23 @@ function select(id){
   document.getElementById('iname').textContent=g.name;
   const decs=(g.decorators||[]).map(d=>'@'+d).join(' ');
   const listItem=(x)=>`<li data-id="${x}">${x.split('.').slice(-1)[0]} <span class="sub" style="color:var(--muted)">${x.split('.').slice(0,-1).join('.')}</span></li>`;
+  const loc=g.file+':'+g.lineno;
+  const gh=(RAW.repo&&RAW.repo.url&&g.file)
+    ? `<a class="srclink" target="_blank" rel="noopener" href="${RAW.repo.url}/blob/${RAW.repo.link_ref||'HEAD'}/${g.file}#L${g.lineno}">Open on GitHub ↗</a>`
+    : '';
   document.getElementById('ibody').innerHTML=`
     <div class="row"><b>Qualified</b><br><code>${g.id}</code></div>
-    <div class="row"><b>Location</b> <code>${g.file}:${g.lineno}</code></div>
+    <div class="row"><b>Location</b> <code>${loc}</code>
+      <button class="srcbtn" data-copy="${loc}" title="Copy file:line">⧉</button> ${gh}</div>
     ${g.class?`<div class="row"><b>Class</b> <code>${g.class}</code></div>`:''}
     ${decs?`<div class="row"><b>Decorators</b> <code>${decs}</code></div>`:''}
     <div class="row"><b>Called by (${nb.ins.length})</b></div><ul>${nb.ins.map(listItem).join('')||'<li class="sub">—</li>'}</ul>
     <div class="row"><b>Calls (${nb.outs.length})</b></div><ul>${nb.outs.map(listItem).join('')||'<li class="sub">—</li>'}</ul>`;
   insp.classList.add('show');
+  const cbtn=insp.querySelector('.srcbtn[data-copy]');
+  if(cbtn)cbtn.addEventListener('click',()=>{const v=cbtn.getAttribute('data-copy');
+    (navigator.clipboard&&navigator.clipboard.writeText?navigator.clipboard.writeText(v):Promise.reject())
+      .then(()=>{cbtn.textContent='✓';setTimeout(()=>cbtn.textContent='⧉',1000);}).catch(()=>{});});
   insp.querySelectorAll('li[data-id]').forEach(li=>li.addEventListener('click',()=>{
     const tid=li.getAttribute('data-id');
     if(level!=='function'){setLevel('function');setTimeout(()=>select(tid),60);}else select(tid);

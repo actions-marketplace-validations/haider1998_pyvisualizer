@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Visualize Django Project Architecture — Call Graph, Not Just Models</title>
+    <meta name="description"
+        content="How to visualize a Django project's real architecture: a deterministic call graph from urls → views → services → models, with a clickable file:line on every edge. Static AST analysis — Django doesn't even need to be installed.">
+    <link rel="canonical" href="https://haider1998.github.io/pyvisualizer/for/django.html">
+    <link rel="stylesheet" href="../style.css">
+    <link rel="stylesheet" href="../use-cases/_uc.css">
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "HowTo",
+      "name": "Visualize a Django project's architecture with py-code-visualizer",
+      "description": "Generate a deterministic call graph of a Django codebase — urls to views to services to models — as an interactive map, and measure the blast radius of any view or service.",
+      "totalTime": "PT2M",
+      "tool": [{ "@type": "HowToTool", "name": "py-code-visualizer" }],
+      "step": [
+        { "@type": "HowToStep", "name": "Generate the interactive map", "text": "pip install py-code-visualizer, then run 'py-code-visualizer visualize <project> -o shop.html'. No code is executed and Django does not need to be importable — analysis is pure AST.", "url": "https://haider1998.github.io/pyvisualizer/for/django.html#map" },
+        { "@type": "HowToStep", "name": "Trace a request path's blast radius", "text": "Run 'py-code-visualizer impact <view-or-service> <project>' to see every transitive caller and callee across urls, views, services, and models.", "url": "https://haider1998.github.io/pyvisualizer/for/django.html#impact" }
+      ]
+    }
+    </script>
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "FAQPage",
+      "mainEntity": [
+        { "@type": "Question", "name": "How is this different from django-extensions graph_models?", "acceptedAnswer": { "@type": "Answer", "text": "graph_models diagrams your model classes and their relations — the data layer only. py-code-visualizer builds the call graph of the whole codebase: which views call which services, which services touch which models, with a file:line on every edge. The two are complementary; use graph_models for the schema and py-code-visualizer for the behavior." } },
+        { "@type": "Question", "name": "Does Django need to be installed for the analysis to work?", "acceptedAnswer": { "@type": "Answer", "text": "No. Analysis is pure AST parsing — nothing is imported or executed, so it works on any Django codebase without its dependencies, virtualenv, or database. That also makes it safe for CI and air-gapped environments." } },
+        { "@type": "Question", "name": "Can it keep an architecture diagram of my Django project up to date automatically?", "acceptedAnswer": { "@type": "Answer", "text": "Yes. 'py-code-visualizer readme' injects a Mermaid diagram into your README between markers, and because output is deterministic a CI job commits only when the architecture actually changed." } }
+      ]
+    }
+    </script>
+</head>
+<body>
+    <nav class="nav" id="nav">
+        <div class="nav-container">
+            <a href="../index.html" class="nav-logo">
+                <img src="../images/PyVizualizer_Logo.png" alt="py-code-visualizer" class="logo-img">
+            </a>
+            <ul class="nav-menu">
+                <li><a href="../use-cases/index.html" class="nav-link">Use cases</a></li>
+                <li><a href="../playground.html" class="nav-link">Playground</a></li>
+                <li><a href="https://github.com/haider1998/PyVisualizer" class="nav-github">GitHub</a></li>
+            </ul>
+        </div>
+    </nav>
+
+    <header class="uc-hero">
+        <div class="container">
+            <span class="section-badge">For Django developers</span>
+            <h1>Visualize your Django architecture — the calls, not just the models</h1>
+            <p class="lead">The standard advice for understanding a big Django codebase is "start at
+                <code>urls.py</code> and trace each view by hand," or run <code>graph_models</code> —
+                which draws the <em>data schema</em> only. Neither shows you what actually happens on a
+                request. The call graph does.</p>
+            <div class="uc-meta">
+                <span class="uc-tag">urls → views → services → models</span>
+                <span class="uc-tag">no code executed</span>
+                <span class="uc-tag">Django not required</span>
+            </div>
+        </div>
+    </header>
+
+    <main class="uc-body container">
+        <p>Every command below runs against a Django-shaped fixture that ships in the repo
+            (<code>examples/scenarios/django_shop</code> — plain Python with the classic
+            urls/views/services/models layering, because pure AST analysis doesn't need Django
+            installed). The output is verbatim; run it yourself and get the same result.</p>
+
+        <div class="uc-step" id="map">
+            <span class="step-num">1</span><h3>One command → the whole request topology</h3>
+            <p style="margin-top:1rem">A single self-contained HTML file: every function is a node,
+                every call is an edge with a <code>file:line</code>, layers roll up to module view for
+                the 10,000-ft picture.</p>
+            <div class="uc-cmd"><span class="p">$</span> pip install py-code-visualizer
+<span class="p">$</span> py-code-visualizer visualize examples/scenarios/django_shop -o shop.html</div>
+            <div class="uc-out">Built graph with <span class="ok">18 functions and 19 calls</span>
+Interactive HTML visualization saved to shop.html</div>
+            <p>The canonical stats for this fixture: 18 functions, 19 calls, <strong>0 cycles, 0
+                ambiguous edges</strong> — and the HTML is one self-contained file (zero network
+                requests). Open it and click <code>checkout_view</code> — the inspector shows its
+                exact location, callers, and callees, each one clickable. New team member? They can walk
+                <code>dispatch → checkout_view → OrderService.checkout → Order.create</code> in a
+                minute instead of grepping for a day.</p>
+        </div>
+
+        <div class="uc-step" id="impact">
+            <span class="step-num">2</span><h3>What does touching <code>checkout</code> actually reach?</h3>
+            <p style="margin-top:1rem">Before you refactor a service, get the blast radius — through
+                every layer, not just the file you're in.</p>
+            <div class="uc-cmd"><span class="p">$</span> py-code-visualizer impact checkout examples/scenarios/django_shop</div>
+            <div class="uc-out">Impact analysis for: services.OrderService.checkout
+<span class="warn">⚠️ Touching `checkout` affects **2** transitive caller(s) across **4** module(s).</span>
+
+Direct callers (1):
+    ← views.checkout_view
+Direct callees (4):
+    → models.Cart.for_user
+    → models.Cart.subtotal
+    → models.Order.create
+    → services.OrderService._notify
+Modules affected: models, services, urls, views</div>
+            <p>Note what resolved there: <code>cart = Cart.for_user(user)</code> then
+                <code>cart.subtotal()</code> — variable-type tracking through a classmethod
+                constructor, statically. That's the accuracy an LLM can't give you, and every edge
+                clicks through to its line.</p>
+        </div>
+
+        <div class="uc-step">
+            <span class="step-num">3</span><h3>Keep it alive in CI</h3>
+            <p style="margin-top:1rem">Architecture docs rot. A deterministic diagram doesn't — CI
+                regenerates it and commits <em>only</em> when the structure really changed.</p>
+            <div class="uc-cmd"><span class="p">$</span> py-code-visualizer init --with readme,review   <span style="opacity:.5"># opt-in: pick only what you want</span></div>
+            <p>That's a self-healing README diagram plus an automatic PR comment showing each change's
+                blast radius — the <a href="../use-cases/review-a-pr.html">review workflow</a>.</p>
+        </div>
+
+        <div class="uc-benefit">
+            <p style="margin:0"><strong>vs. <code>graph_models</code>:</strong> django-extensions'
+                <code>graph_models</code> is great at what it documents — a diagram of your model
+                classes and relations. It doesn't show call flow: which view hits which service, what a
+                request actually executes. Use both: <code>graph_models</code> for the schema,
+                py-code-visualizer for the behavior — with provenance on every arrow.</p>
+        </div>
+
+        <p class="uc-note">Fixture: <code>examples/scenarios/django_shop</code>. Output shown verbatim.
+            Works the same on real Django apps of any size — a
+            <a href="../facts.html">measured 98,669-line project maps in ~4.9 s</a>.</p>
+
+        <a href="../use-cases/index.html" class="uc-nav-back">← All use cases</a>
+    </main>
+
+    <footer class="footer">
+        <div class="container">
+            <p style="text-align:center;opacity:.7;padding:2rem 0">
+                Deterministic, AST-verified architecture ground truth ·
+                <a href="https://github.com/haider1998/PyVisualizer">py-code-visualizer</a> · MIT
+            </p>
+        </div>
+    </footer>
+    <script src="../script.js"></script>
+</body>
+</html>

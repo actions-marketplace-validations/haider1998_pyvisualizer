@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Find and Fix Circular Dependencies in Python — Before They Hit Prod</title>
+    <meta name="description"
+        content="How to detect circular dependencies in Python at the call-graph level: a CI gate that fails the build with the exact cycle chain, and a PR diff that catches the commit that introduced it. Static AST analysis, no code executed.">
+    <link rel="canonical" href="https://haider1998.github.io/pyvisualizer/solve/circular-imports.html">
+    <link rel="stylesheet" href="../style.css">
+    <link rel="stylesheet" href="../use-cases/_uc.css">
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "HowTo",
+      "name": "Detect and gate circular dependencies in Python with py-code-visualizer",
+      "description": "Fail CI the moment a circular dependency appears, and catch the exact PR that introduced one — at the call-graph level, stricter than import linting.",
+      "totalTime": "PT2M",
+      "tool": [{ "@type": "HowToTool", "name": "py-code-visualizer" }],
+      "step": [
+        { "@type": "HowToStep", "name": "Gate cycles in CI", "text": "Run 'py-code-visualizer check <project> --fail-on-cycles'. It exits non-zero and prints the exact cycle chain when a circular dependency exists.", "url": "https://haider1998.github.io/pyvisualizer/solve/circular-imports.html#gate" },
+        { "@type": "HowToStep", "name": "Catch the PR that introduces one", "text": "Snapshot the graph as JSON on base and head, then run 'py-code-visualizer diff base.json head.json --fail-on-new-cycles' — the report names the new cycle and the exact added calls.", "url": "https://haider1998.github.io/pyvisualizer/solve/circular-imports.html#pr" }
+      ]
+    }
+    </script>
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "FAQPage",
+      "mainEntity": [
+        { "@type": "Question", "name": "What's the difference between an import cycle and a call cycle in Python?", "acceptedAnswer": { "@type": "Answer", "text": "An import cycle is two modules importing each other — Python may raise ImportError at startup, and import linters catch it. A call cycle is functions transitively calling each other (A calls B calls A), which imports alone can't reveal: an import can exist without being used, while a call edge is a real runtime dependency. py-code-visualizer detects cycles at the call-graph level, which catches both the structural knot and the behavioral one." } },
+        { "@type": "Question", "name": "How do I make CI fail when a circular dependency is introduced?", "acceptedAnswer": { "@type": "Answer", "text": "Add 'py-code-visualizer check . --fail-on-cycles' to CI (it exits 1 and prints the cycle chain), or use 'py-code-visualizer diff base.json head.json --fail-on-new-cycles' in the PR workflow so only newly introduced cycles fail the build. 'py-code-visualizer init --with gates' generates the workflow for you." } },
+        { "@type": "Question", "name": "Does cycle detection execute my code?", "acceptedAnswer": { "@type": "Answer", "text": "No. The call graph is built with pure AST parsing — nothing is imported or executed — so the gate runs anywhere, including air-gapped CI, without installing your app's dependencies." } }
+      ]
+    }
+    </script>
+</head>
+<body>
+    <nav class="nav" id="nav">
+        <div class="nav-container">
+            <a href="../index.html" class="nav-logo">
+                <img src="../images/PyVizualizer_Logo.png" alt="py-code-visualizer" class="logo-img">
+            </a>
+            <ul class="nav-menu">
+                <li><a href="../use-cases/index.html" class="nav-link">Use cases</a></li>
+                <li><a href="../playground.html" class="nav-link">Playground</a></li>
+                <li><a href="https://github.com/haider1998/PyVisualizer" class="nav-github">GitHub</a></li>
+            </ul>
+        </div>
+    </nav>
+
+    <header class="uc-hero">
+        <div class="container">
+            <span class="section-badge">Solve · Circular dependencies</span>
+            <h1>Find circular dependencies before they find you</h1>
+            <p class="lead">Cycles don't announce themselves. They accrete — one convenient callback at
+                a time — until a refactor deadlocks or an import blows up at startup. The fix is not
+                vigilance; it's a gate that makes a cycle <em>fail the build</em> with the exact chain
+                printed.</p>
+            <div class="uc-meta">
+                <span class="uc-tag">check --fail-on-cycles</span>
+                <span class="uc-tag">diff --fail-on-new-cycles</span>
+                <span class="uc-tag">call-level, not just imports</span>
+            </div>
+        </div>
+    </header>
+
+    <main class="uc-body container">
+        <p><strong>Import cycles vs call cycles — be precise.</strong> An import linter sees that
+            module A imports B and B imports A. But an import can sit unused, and a genuine behavioral
+            loop can thread through modules whose imports look innocent. A <em>call-graph</em> cycle —
+            <code>persist() → audit() → persist()</code> — is a real runtime dependency loop, and
+            that's the level this gate works at.</p>
+
+        <p>The demo below uses the repo fixture <code>examples/scenarios/refactor</code>: a service in
+            two states, where the "after" refactor added an audit hook that quietly closed a loop.
+            Output is verbatim.</p>
+
+        <div class="uc-step" id="gate">
+            <span class="step-num">1</span><h3>The gate: one command, exact chain, exit 1</h3>
+            <div class="uc-cmd"><span class="p">$</span> py-code-visualizer check examples/scenarios/refactor/after --fail-on-cycles</div>
+            <div class="uc-out"><span class="bad">🔴 1 circular dependency violation(s):</span>
+    cycle: persist -&gt; audit -&gt; persist
+
+$ echo $?
+<span class="bad">1</span>   # CI fails — with the chain, not a shrug</div>
+            <p>No spelunking: the offending loop is named. On the clean "before" state the same command
+                prints <code>✅ Architecture check passed</code> and exits 0.</p>
+        </div>
+
+        <div class="uc-step" id="pr">
+            <span class="step-num">2</span><h3>Catch the exact PR that introduces one</h3>
+            <p style="margin-top:1rem">Better than failing on cycles that already exist: fail only on
+                <em>new</em> ones, in the pull request that creates them, with the added calls named.</p>
+            <div class="uc-cmd"><span class="p">$</span> py-code-visualizer json examples/scenarios/refactor/before -o base.json
+<span class="p">$</span> py-code-visualizer json examples/scenarios/refactor/after  -o head.json
+<span class="p">$</span> py-code-visualizer diff base.json head.json --fail-on-new-cycles</div>
+            <div class="uc-out">### 🔴 New circular dependencies
+
+- `persist → audit → persist`
+
+### 🔗 Added calls (2)
+
+- `persist` → `audit`
+- `audit` → `persist`
+
+$ echo $?
+<span class="bad">2</span>   # the PR that closes a loop cannot merge quietly</div>
+            <p>The report renders as a PR comment (Mermaid subgraph included), so the reviewer sees the
+                loop the moment it's born. Setup is one opt-in command:
+                <code>py-code-visualizer init --with gates</code>.</p>
+        </div>
+
+        <div class="uc-benefit">
+            <p style="margin:0"><strong>Why this beats eyeballing:</strong> cycle detection runs on the
+                parsed AST — no code executed, no dependencies installed — and output is deterministic,
+                so the gate never flaps. When a cycle is reported, it's real, and the chain plus the
+                <code>file:line</code> of every participating call is right there.</p>
+        </div>
+
+        <p class="uc-note">Fixture: <code>examples/scenarios/refactor</code> (before/after). Full
+            walkthrough with blast-radius analysis:
+            <a href="../use-cases/fearless-refactor.html">the fearless refactor</a>.</p>
+
+        <a href="../use-cases/index.html" class="uc-nav-back">← All use cases</a>
+    </main>
+
+    <footer class="footer">
+        <div class="container">
+            <p style="text-align:center;opacity:.7;padding:2rem 0">
+                Deterministic, AST-verified architecture ground truth ·
+                <a href="https://github.com/haider1998/PyVisualizer">py-code-visualizer</a> · MIT
+            </p>
+        </div>
+    </footer>
+    <script src="../script.js"></script>
+</body>
+</html>

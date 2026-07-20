@@ -114,6 +114,7 @@
 html {
     scroll-behavior: smooth;
     font-size: 16px;
+    overflow-x: clip;
 }
 
 body {
@@ -125,6 +126,10 @@ body {
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
     transition: background-color var(--transition-base), color var(--transition-base);
+    /* The page must never scroll horizontally. `clip` prevents it without the
+       scroll-container side-effects `hidden` has on the sticky nav. Wide content
+       (tables, code) scrolls inside its own overflow-x container instead. */
+    overflow-x: clip;
 }
 
 img,
@@ -935,6 +940,9 @@ code {
     border-radius: var(--radius-xl);
     padding: var(--space-xl);
     transition: transform var(--transition-base), box-shadow var(--transition-base);
+    /* Let this grid cell shrink so long commands scroll inside the code block
+       instead of pushing the whole card off-screen. */
+    min-width: 0;
 }
 
 .install-step:hover {
@@ -965,6 +973,7 @@ code {
 
 .step-content {
     flex: 1;
+    min-width: 0;
 }
 
 .step-content h3 {
@@ -982,15 +991,18 @@ code {
     border: 1px solid var(--border-color);
     border-radius: var(--radius-md);
     padding: var(--space-md);
-    overflow-x: auto;
+    min-width: 0;
 }
 
 .code-block code {
     flex: 1;
+    min-width: 0;
     font-size: 0.85rem;
     color: var(--text-primary);
     white-space: nowrap;
     line-height: 1.5;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
 }
 
 .code-block .copy-btn {

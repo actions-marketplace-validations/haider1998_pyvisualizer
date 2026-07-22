@@ -176,3 +176,61 @@ class TestContext:
         pack = build_context_pack(result, from_git="main")
         assert "core.persist" in pack.focus
         assert "service.audit" in pack.focus
+
+
+class TestPageRankIsSelfContained:
+    """Guards the P0 bug where ranking silently degraded to alphabetical order.
+
+    ``nx.pagerank`` dispatches to SciPy, which is **not** a dependency of this
+    package. The old code caught the resulting ``ModuleNotFoundError`` and scored
+    every node 0.0, so the tie-break in ``_select_nodes`` fell back to sorting by
+    name and the pack filled with whatever came first in the alphabet — and the
+    output changed depending on whether NumPy happened to be installed.
+    """
+
+    def test_ranking_does_not_call_networkx_pagerank(self, monkeypatch):
+        """The ranking must not depend on NumPy/SciPy being importable at all."""
+        import networkx as nx
+
+        from pyvisualizer.context import personalized_pagerank
+
+        def _explode(*args, **kwargs):
+            raise AssertionError("nx.pagerank must not be used: it requires SciPy")
+
+        monkeypatch.setattr(nx, "pagerank", _explode)
+
+        G = nx.DiGraph([("a", "b"), ("b", "c"), ("x", "y")])
+        pr = personalized_pagerank(G, ["a"])
+        assert pr["a"] > 0.0
+        assert pr["b"] > 0.0
+        # A disconnected node is unreachable from the focus and scores exactly zero.
+        assert pr["y"] == 0.0
+
+    def test_pack_never_includes_functions_unreachable_from_focus(self, repo_before_after):
+        """Budget fill must not pad the pack with unrelated functions."""
+        import networkx as nx
+
+        result = build_graph(repo_before_after)
+        G = result.graph
+        pack = build_context_pack(result, focus=["persist"], budget_tokens=100000)
+        reachable = nx.node_connected_component(G.to_undirected(), pack.focus[0])
+        unrelated = [n for n in pack.included if n not in reachable]
+        assert unrelated == [], f"pack padded with unrelated functions: {unrelated}"
+
+    def test_ranking_is_stable_without_numpy(self, repo_before_after, monkeypatch):
+        """Same input, same pack — whether or not NumPy can be imported."""
+        import builtins
+
+        result = build_graph(repo_before_after)
+        with_numpy = render_pack_markdown(build_context_pack(result, focus=["persist"]))
+
+        real_import = builtins.__import__
+
+        def _no_numpy(name, *args, **kwargs):
+            if name.split(".")[0] in {"numpy", "scipy"}:
+                raise ModuleNotFoundError(f"No module named {name!r}")
+            return real_import(name, *args, **kwargs)
+
+        monkeypatch.setattr(builtins, "__import__", _no_numpy)
+        without_numpy = render_pack_markdown(build_context_pack(result, focus=["persist"]))
+        assert with_numpy == without_numpy

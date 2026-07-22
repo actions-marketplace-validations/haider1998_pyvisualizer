@@ -1,0 +1,28 @@
+{
+  "validated": [
+    {
+      "instance_id": "django__django-12273",
+      "repo": "django/django",
+      "version": "3.1",
+      "usable": true,
+      "f2p_fails_before_fix": true,
+      "p2p_passes_before_fix": true,
+      "test_patch_applied": true,
+      "install_mode": "editable | no-pins",
+      "f2p_tail": "3__control/django/db/backends/sqlite3/base.py\", line 401, in execute\n    return Database.Cursor.execute(self, query, params)\ndjango.db.utils.IntegrityError: UNIQUE constraint failed: model_inheritance_regress_congressman.politician_ptr_id\n\n----------------------------------------------------------------------\nRan 2 tests in 0.014s\n\nFAILED (errors=2)\nDestroying test database for alias 'default'...\n",
+      "p2p_tail": "ude Code/pyvisualizer/.claude/worktrees/nervous-mahavira-a0ff88/experiments/.cache/agent_runs/django__django-12273__control/django'\nSystem check identified no issues (0 silenced).\nCreating test database for alias 'default'...\n...........................\n----------------------------------------------------------------------\nRan 27 tests in 0.043s\n\nOK\nDestroying test database for alias 'default'...\n"
+    },
+    {
+      "instance_id": "django__django-15375",
+      "repo": "django/django",
+      "version": "4.1",
+      "usable": false,
+      "f2p_fails_before_fix": true,
+      "p2p_passes_before_fix": false,
+      "test_patch_applied": true,
+      "install_mode": "editable | no-pins",
+      "f2p_tail": "0ff88/experiments/.cache/agent_runs/django__django-15375__control/django/db/backends/sqlite3/base.py\", line 334, in execute\n    return Database.Cursor.execute(self, query, params)\ndjango.db.utils.OperationalError: near \"FROM\": syntax error\n\n----------------------------------------------------------------------\nRan 1 test in 0.015s\n\nFAILED (errors=1)\nDestroying test database for alias 'default'...\n",
+      "p2p_tail": "/experiments/.cache/agent_runs/django__django-15375__control/django/test/runner.py\", line 732, in load_tests_for_label\n    tests = self.test_loader.loadTestsFromName(label)\n  File \"/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/unittest/loader.py\", line 154, in loadTestsFromName\n    module = __import__(module_name)\nValueError: Empty module name\n"
+    }
+  ]
+}

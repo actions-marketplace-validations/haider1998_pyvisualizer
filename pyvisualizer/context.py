@@ -116,6 +116,74 @@ def _est_tokens(text: str) -> int:
     return max(1, len(text) // _CHARS_PER_TOKEN)
 
 
+def personalized_pagerank(
+    G: nx.DiGraph,
+    focus: List[str],
+    *,
+    alpha: float = 0.85,
+    max_iter: int = 100,
+    tol: float = 1.0e-10,
+    bidirectional: bool = True,
+) -> Dict[str, float]:
+    """Personalized PageRank, computed here rather than via ``nx.pagerank``.
+
+    networkx's ``pagerank`` dispatches to a SciPy implementation, and SciPy (with
+    NumPy) is **not** a dependency of this package. Calling it on a normal install
+    raises ``ModuleNotFoundError``; the previous code caught that and fell back to
+    all-zero scores, which made the tie-break in ``_select_nodes`` degrade to plain
+    alphabetical order — so a pack "focused" on one function quietly filled up with
+    whatever sorted first. Worse, the output then depended on whether NumPy happened
+    to be installed, breaking the determinism invariant.
+
+    This is a plain power iteration over the same random-surfer model, using only
+    the stdlib: deterministic, dependency-free, and identical on every machine.
+    Dangling nodes (no out-edges) redistribute their mass to the focus set, which is
+    what "personalized" means — the surfer always teleports back to the task.
+
+    ``bidirectional`` walks call edges both ways. Relevance in a codebase is not
+    one-directional: the callers of the function you are changing (its blast radius)
+    matter as much as what it calls. A purely directed walk reaches only descendants,
+    scoring every caller zero.
+    """
+    nodes = sorted(G.nodes())
+    if not nodes:
+        return {}
+    teleport = [n for n in focus if n in G]
+    if not teleport:
+        return {n: 0.0 for n in nodes}
+
+    weight = 1.0 / len(teleport)
+    personalization = {n: 0.0 for n in nodes}
+    for n in teleport:
+        personalization[n] = weight
+
+    if bidirectional:
+        succ = {n: sorted(set(G.successors(n)) | set(G.predecessors(n))) for n in nodes}
+    else:
+        succ = {n: sorted(G.successors(n)) for n in nodes}
+    dangling = [n for n in nodes if not succ[n]]
+    rank = dict(personalization)
+
+    for _ in range(max_iter):
+        nxt = {n: 0.0 for n in nodes}
+        # Mass stranded on dangling nodes teleports back to the focus set.
+        leaked = alpha * sum(rank[n] for n in dangling)
+        for n in nodes:
+            out = succ[n]
+            if not out:
+                continue
+            share = alpha * rank[n] / len(out)
+            for m in out:
+                nxt[m] += share
+        for n in nodes:
+            nxt[n] += (1.0 - alpha + leaked) * personalization[n]
+        delta = sum(abs(nxt[n] - rank[n]) for n in nodes)
+        rank = nxt
+        if delta < tol:
+            break
+    return rank
+
+
 def _select_nodes(
     G: nx.DiGraph,
     focus: List[str],
@@ -123,20 +191,19 @@ def _select_nodes(
     top: str,
     repo_url: str,
 ) -> List[str]:
-    """Focus + neighbors always; then PageRank-ranked fill to the token budget."""
+    """Focus + neighbors always; then PageRank-ranked fill to the token budget.
+
+    The fill only ever considers functions the focus can actually reach through
+    call edges. Padding the budget with unrelated functions is worse than leaving
+    it unspent: it spends an agent's context on noise and dilutes the signal the
+    pack exists to deliver.
+    """
     base: set = set(focus)
     for f in focus:
         base |= set(G.predecessors(f)) | set(G.successors(f))
 
     focus_set = set(focus)
-    if focus_set and G.number_of_edges() > 0:
-        personalization = {n: (1.0 if n in focus_set else 0.0) for n in G.nodes()}
-        try:
-            pr: Dict[str, float] = nx.pagerank(G, personalization=personalization)
-        except Exception:  # pragma: no cover - convergence fallback
-            pr = {n: 0.0 for n in G.nodes()}
-    else:
-        pr = {n: 0.0 for n in G.nodes()}
+    pr = personalized_pagerank(G, sorted(focus_set)) if focus_set else {}
 
     def rank(n: str) -> tuple:
         return (-round(pr.get(n, 0.0), 12), n)
@@ -145,7 +212,12 @@ def _select_nodes(
     selected: List[str] = sorted(base, key=rank)
     tokens = sum(_est_tokens(_node_line(G, n, top, repo_url)) for n in selected)
 
-    rest = sorted((n for n in G.nodes() if n not in base), key=rank)
+    # Only connected functions are eligible; a zero score means the focus cannot
+    # reach it at all, so it has nothing to do with the task.
+    rest = sorted(
+        (n for n in G.nodes() if n not in base and pr.get(n, 0.0) > 0.0),
+        key=rank,
+    )
     for n in rest:
         cost = _est_tokens(_node_line(G, n, top, repo_url))
         if tokens + cost > budget_tokens:

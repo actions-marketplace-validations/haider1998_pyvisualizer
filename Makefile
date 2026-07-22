@@ -45,15 +45,15 @@ test-cov:
 # Code quality
 lint:
 	@echo "Running flake8..."
-	flake8 pyvisualizer tests benchmarks --max-line-length=100 --ignore=E501,W503
+	flake8 pyvisualizer tests benchmarks experiments --max-line-length=100 --ignore=E501,W503
 	@echo "Running mypy..."
-	mypy pyvisualizer benchmarks --ignore-missing-imports
+	mypy pyvisualizer benchmarks experiments --ignore-missing-imports
 
 format:
 	@echo "Running black..."
-	black pyvisualizer tests benchmarks
+	black pyvisualizer tests benchmarks experiments/*.py
 	@echo "Running isort..."
-	isort pyvisualizer tests benchmarks
+	isort pyvisualizer tests benchmarks experiments/*.py
 
 type-check:
 	mypy pyvisualizer --ignore-missing-imports

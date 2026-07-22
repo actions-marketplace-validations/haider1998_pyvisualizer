@@ -31,7 +31,7 @@ import re
 import shutil
 import subprocess
 import sys
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Tuple
 
 from experiments import dataset, envspec, repos, seeds
 from pyvisualizer.api import build_graph
@@ -248,8 +248,10 @@ def _venv_python(workdir: str) -> str:
     py = os.path.join(venv, "bin", "python")
     if not os.path.exists(py):
         subprocess.run([_base_interpreter(), "-m", "venv", venv], check=True, capture_output=True)
+        # setuptools <81: 81 removed `pkg_resources`, which these snapshots
+        # (sphinx, pylint, older pytest plugins) still import at startup.
         subprocess.run(
-            [py, "-m", "pip", "-q", "install", "-U", "pip", "setuptools", "wheel"],
+            [py, "-m", "pip", "-q", "install", "-U", "pip", "setuptools<81", "wheel"],
             capture_output=True,
         )
     return py
@@ -314,39 +316,88 @@ def _reset_test_files(workdir: str, test_patch: str) -> None:
                 os.remove(target)
 
 
-def _django_test_id(raw: str) -> str:
-    """`test_x (module.Class)` → `module.Class.test_x`, which runtests.py accepts."""
-    m = _DJANGO_TEST_RE.match(raw.strip())
-    return f"{m.group(2)}.{m.group(1)}" if m else raw.strip()
+# pytest's `-rA` short summary: "PASSED path::test[param]" etc.
+_PYTEST_RESULT_RE = re.compile(r"^(PASSED|FAILED|ERROR|XFAIL|XPASS|SKIPPED)\s+(\S+)", re.MULTILINE)
+# django's `--verbosity 2`: "test_x (module.Class) ... ok" / "... FAIL"
+_DJANGO_RESULT_RE = re.compile(
+    r"^(test\w+) \(([\w.]+)\)(?:[^\n]*?) \.\.\. (ok|FAIL|ERROR|skipped|expected failure|unexpected success)",
+    re.MULTILINE,
+)
+_PASSING = {"PASSED", "XFAIL", "SKIPPED", "ok", "skipped", "expected failure"}
 
 
-def _test_command(repo: str, py: str, tests: List[str]) -> Tuple[List[str], Optional[str]]:
+def _run_and_parse(
+    workdir: str, repo: str, py: str, tests: List[str], timeout: int = 2400
+) -> Dict[str, Any]:
+    """Run the *files* the tests live in, then read each test's outcome from the log.
+
+    Selecting tests by node id looked obvious and does not work: parametrized ids
+    like ``test_prepend_scheme_if_needed[http://user:pass@example.com/...]`` are
+    generated differently across pytest versions, and repos with doctest
+    collection expose two collectors for the same file — so pytest reports "no
+    match" for tests that are present and fine. Django's runner has its own
+    version of the problem. SWE-bench solves it by parsing the report rather than
+    trusting id selection, and so do we: run the whole file, then look up each
+    test by name in the output.
+    """
+    if not tests:
+        return {"ran": 0, "passed": True, "output": "(no tests specified)", "missing": []}
+
     if repo == "django/django":
-        return (
-            [py, "tests/runtests.py", "--settings=test_sqlite", "--verbosity=1"]
-            + [_django_test_id(t) for t in tests],
-            None,
+        labels = sorted(
+            {m.group(2) for m in (_DJANGO_TEST_RE.match(t.strip()) for t in tests) if m}
         )
-    return ([py, "-m", "pytest", "-x", "-q", "--no-header"] + tests, None)
+        cmd = [py, "tests/runtests.py", "--settings=test_sqlite", "--verbosity=2"] + labels
+        result_re, key = _DJANGO_RESULT_RE, "django"
+    else:
+        files = sorted(
+            {t.split("::")[0] for t in tests if "::" in t}
+            | {t for t in tests if "::" not in t and t.endswith(".py")}
+        )
+        cmd = [py, "-m", "pytest", "-rA", "--tb=no", "-p", "no:cacheprovider", "-q"] + files
+        result_re, key = _PYTEST_RESULT_RE, "pytest"
+
+    try:
+        proc = subprocess.run(cmd, cwd=workdir, capture_output=True, text=True, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        return {"ran": len(tests), "passed": False, "output": "TIMEOUT", "missing": tests}
+
+    log = proc.stdout + proc.stderr
+    outcomes: Dict[str, str] = {}
+    if key == "django":
+        for m in result_re.finditer(log):
+            outcomes[f"{m.group(1)} ({m.group(2)})"] = m.group(3)
+    else:
+        for m in result_re.finditer(log):
+            outcomes[m.group(2)] = m.group(1)
+            outcomes[m.group(2).split("::", 1)[-1]] = m.group(1)  # also key by the id sans file
+
+    missing: List[str] = []
+    failed: List[str] = []
+    for t in tests:
+        raw = t.strip()
+        status = outcomes.get(raw) or outcomes.get(raw.split("::", 1)[-1])
+        if status is None:
+            missing.append(raw)
+        elif status not in _PASSING:
+            failed.append(raw)
+
+    return {
+        "ran": len(tests),
+        "resolved": len(tests) - len(missing),
+        # A test we could not find an outcome for is not a pass.
+        "passed": not failed and not missing,
+        "failed_tests": failed[:20],
+        "missing": missing[:20],
+        "returncode": proc.returncode,
+        "output": log[-4000:],
+    }
 
 
 def _run_tests(
-    workdir: str, repo: str, py: str, tests: List[str], timeout: int = 1800
+    workdir: str, repo: str, py: str, tests: List[str], timeout: int = 2400
 ) -> Dict[str, Any]:
-    if not tests:
-        return {"ran": 0, "passed": True, "output": "(no tests specified)"}
-    cmd, _ = _test_command(repo, py, tests)
-    try:
-        proc = subprocess.run(cmd, cwd=workdir, capture_output=True, text=True, timeout=timeout)
-        out = (proc.stdout + proc.stderr)[-4000:]
-        return {
-            "ran": len(tests),
-            "passed": proc.returncode == 0,
-            "returncode": proc.returncode,
-            "output": out,
-        }
-    except subprocess.TimeoutExpired:
-        return {"ran": len(tests), "passed": False, "returncode": -1, "output": "TIMEOUT"}
+    return _run_and_parse(workdir, repo, py, tests, timeout)
 
 
 def grade(instance_id: str, arm: str) -> Dict[str, Any]:

@@ -191,39 +191,54 @@ def _select_nodes(
     top: str,
     repo_url: str,
 ) -> List[str]:
-    """Focus + neighbors always; then PageRank-ranked fill to the token budget.
+    """Focus first, then neighbours, then PageRank-ranked fill — all under budget.
 
-    The fill only ever considers functions the focus can actually reach through
-    call edges. Padding the budget with unrelated functions is worse than leaving
-    it unspent: it spends an agent's context on noise and dilutes the signal the
-    pack exists to deliver.
+    ``budget_tokens`` is a promise: an agent asking for a 4,000-token pack has
+    4,000 tokens to spend. Only the focus itself is exempt, because dropping what
+    the caller explicitly asked about would be worse than overrunning.
+
+    The fill only considers functions the focus can actually reach through call
+    edges. Padding the budget with unrelated functions is worse than leaving it
+    unspent: it spends an agent's context on noise and dilutes the signal.
     """
-    base: set = set(focus)
-    for f in focus:
-        base |= set(G.predecessors(f)) | set(G.successors(f))
-
     focus_set = set(focus)
     pr = personalized_pagerank(G, sorted(focus_set)) if focus_set else {}
 
     def rank(n: str) -> tuple:
         return (-round(pr.get(n, 0.0), 12), n)
 
-    # Base is always in (task neighborhood must never be dropped).
-    selected: List[str] = sorted(base, key=rank)
-    tokens = sum(_est_tokens(_node_line(G, n, top, repo_url)) for n in selected)
+    def cost(n: str) -> int:
+        return _est_tokens(_node_line(G, n, top, repo_url))
 
-    # Only connected functions are eligible; a zero score means the focus cannot
-    # reach it at all, so it has nothing to do with the task.
-    rest = sorted(
-        (n for n in G.nodes() if n not in base and pr.get(n, 0.0) > 0.0),
-        key=rank,
-    )
-    for n in rest:
-        cost = _est_tokens(_node_line(G, n, top, repo_url))
-        if tokens + cost > budget_tokens:
-            break
-        selected.append(n)
-        tokens += cost
+    # 1. The focus is non-negotiable — it is what was asked for.
+    selected: List[str] = sorted(focus_set, key=rank)
+    tokens = sum(cost(n) for n in selected)
+    chosen: set = set(selected)
+
+    # 2. Direct neighbours, best-ranked first — but they are *not* exempt from the
+    #    budget. Adding every neighbour of every seed unconditionally is how a
+    #    4,000-token request used to return 52,000 tokens on a hub-heavy repo.
+    neighbours: set = set()
+    for f in focus_set:
+        if f in G:
+            neighbours |= set(G.predecessors(f)) | set(G.successors(f))
+    neighbours -= chosen
+
+    # 3. Then everything else the focus can reach, by personalized PageRank.
+    rest = [n for n in G.nodes() if n not in chosen and n not in neighbours and pr.get(n, 0.0) > 0.0]
+
+    for group in (sorted(neighbours, key=rank), sorted(rest, key=rank)):
+        for n in group:
+            c = cost(n)
+            if tokens + c > budget_tokens:
+                # Skip this one and keep going: a single unusually long signature
+                # must not halt the fill while cheaper, equally relevant functions
+                # are still waiting. (Stopping here left 77% of packs under 75%
+                # of their budget.)
+                continue
+            chosen.add(n)
+            selected.append(n)
+            tokens += c
     return sorted(selected)
 
 

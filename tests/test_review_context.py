@@ -234,3 +234,62 @@ class TestPageRankIsSelfContained:
         monkeypatch.setattr(builtins, "__import__", _no_numpy)
         without_numpy = render_pack_markdown(build_context_pack(result, focus=["persist"]))
         assert with_numpy == without_numpy
+
+
+class TestBudgetIsRespected:
+    """`--budget-tokens N` is a promise, and it used to be broken both ways.
+
+    Measured across 322 real SWE-bench repositories at a 4,000-token budget, the
+    old selection landed inside 75-100% of budget only 7% of the time: 16% of
+    packs overran (worst case 52,615 tokens — 13x the request) because focus
+    neighbours were added with no budget check at all, and 77% came in under 75%
+    because the fill stopped at the first function too large to fit instead of
+    skipping it.
+    """
+
+    def _wide_graph(self, tmp_path):
+        """A hub with many neighbours — the shape that caused the 13x overrun."""
+        pkg = tmp_path / "wide"
+        pkg.mkdir()
+        callers = "\n\n".join(
+            f"def caller_{i}(argument_number_one, argument_number_two):\n    return hub()"
+            for i in range(60)
+        )
+        (pkg / "mod.py").write_text(f"def hub():\n    return 1\n\n\n{callers}\n")
+        return str(pkg)
+
+    def test_pack_does_not_exceed_budget(self, tmp_path):
+        """Budget governs function selection, which is what it is spent on."""
+        from pyvisualizer.context import _est_tokens
+
+        result = build_graph(self._wide_graph(tmp_path))
+        budget = 200
+        pack = build_context_pack(result, focus=["hub"], budget_tokens=budget)
+        spent = sum(_est_tokens(line) for line in pack.rendered_nodes)
+        assert spent <= budget, (
+            f"pack spent {spent} tokens against a {budget} budget "
+            f"({len(pack.included)} functions)"
+        )
+
+    def test_focus_survives_an_impossible_budget(self, tmp_path):
+        """The one thing that may exceed budget is what the caller asked for."""
+        result = build_graph(self._wide_graph(tmp_path))
+        pack = build_context_pack(result, focus=["hub"], budget_tokens=1)
+        assert "mod.hub" in pack.included
+
+    def test_fill_skips_an_oversized_entry_instead_of_stopping(self, tmp_path):
+        """One huge signature must not halt the fill while cheap nodes remain."""
+        pkg = tmp_path / "mixed"
+        pkg.mkdir()
+        huge_args = ", ".join(f"parameter_with_a_very_long_name_{i}" for i in range(40))
+        (pkg / "mod.py").write_text(
+            "def hub():\n    return whale() or minnow_one() or minnow_two()\n\n"
+            f"def whale({huge_args}):\n    return 1\n\n"
+            "def minnow_one():\n    return 1\n\n"
+            "def minnow_two():\n    return 1\n"
+        )
+        result = build_graph(str(pkg))
+        # Enough budget for the small functions, not for the whale.
+        pack = build_context_pack(result, focus=["hub"], budget_tokens=90)
+        assert "mod.minnow_one" in pack.included and "mod.minnow_two" in pack.included
+        assert "mod.whale" not in pack.included

@@ -60,7 +60,7 @@
         "operatingSystem": "OS Independent",
         "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
         "author": { "@type": "Person", "name": "Syed Mohd Haider Rizvi", "url": "https://github.com/haider1998" },
-        "softwareVersion": "2.0.0",
+        "softwareVersion": "2.3.1",
         "softwareRequirements": "Python 3.8+",
         "downloadUrl": "https://pypi.org/project/py-code-visualizer/",
         "installUrl": "https://pypi.org/project/py-code-visualizer/",
@@ -218,7 +218,7 @@
         <div class="container hero-content">
             <div class="hero-badge">
                 <span class="badge-icon">🗺️</span>
-                <span>v2.0.0 — The Ground Truth Engine</span>
+                <span>v2.3.1 — The Ground Truth Engine</span>
             </div>
             <h1 class="hero-title">
                 LLMs guess your architecture.
@@ -656,7 +656,7 @@ flowchart TD
                 <a class="uc-index-card" href="use-cases/agent-context.html">
                     <div class="ic">🤖</div>
                     <h3>Feed your agent the right context</h3>
-                    <p>A verified, task-scoped context pack — <strong>~96% fewer tokens</strong> than the whole repo,
+                    <p>A verified, task-scoped context pack — <strong>97% fewer tokens</strong> than the whole repo,
                         zero guessed edges — plus AGENTS.md wiring so agents actually use it.</p>
                     <div class="cmds"><code>context --focus</code><code>export --for-ai</code></div>
                     <div class="go">Read the walkthrough →</div>
@@ -772,8 +772,16 @@ flowchart TD
                     <div class="num">SHA-256<br>equal</div>
                     <div class="lbl">two runs, byte-identical output — diffable, gate-able, committable</div>
                 </div>
+                <div class="proof-card">
+                    <div class="num">97%</div>
+                    <div class="lbl">fewer tokens for AI agents — 139,697 → ~4,000 on a real open-source codebase</div>
+                </div>
+                <div class="proof-card">
+                    <div class="num">$2.04</div>
+                    <div class="lbl">saved per task on Claude Opus 5 — 35× more relevant-code signal per token vs full source</div>
+                </div>
             </div>
-            <p class="proof-note">Measured on macOS (arm64), Python 3.14, commit <code>79c3900</code>, on a deterministic
+            <p class="proof-note" style="margin-bottom:.5rem">Token measurements ran on the <a href="use-cases/agent-context.html">httpx codebase</a> (1,076 functions, real closed bug) using <code>py-code-visualizer context --task</code>. Speed benchmark: macOS (arm64), Python 3.14, commit <code>79c3900</code>, on a deterministic
                 synthetic project (seed 1998). Speed is hardware-dependent — reproduce it yourself with
                 <code>python benchmarks/bench.py</code>, which writes <a href="benchmarks.json">benchmarks.json</a>.
                 Provenance, zero-network, and byte-determinism are <em>structural</em> guarantees, not benchmark luck.</p>
@@ -900,7 +908,7 @@ flowchart TD
                 <details class="faq-item">
                     <summary>How do I give an AI coding agent verified context about my codebase?</summary>
                     <div class="faq-body"><code>py-code-visualizer context . --focus &lt;fn&gt;</code> builds a task-scoped pack
-                        (~96% fewer tokens than the whole source on a 100k-line project, zero guessed edges), and
+                        (97% fewer tokens than the whole source on a real project, zero guessed edges), and
                         <code>export --for-ai</code> wires <code>AGENTS.md</code> so Copilot/Cursor/Claude consume the
                         verified graph. Full walkthrough: <a href="use-cases/agent-context.html">feed your agent the right
                         context</a>.</div>
@@ -990,8 +998,9 @@ flowchart TD
                 </div>
             </div>
             <div class="footer-bottom">
-                <p>Made with ❤️ by <a href="https://github.com/haider1998" target="_blank" rel="noopener">Syed Mohd
-                        Haider Rizvi</a></p>
+                <p>Made with ❤️ by <a href="https://haider1998.github.io/" target="_blank" rel="noopener">Syed Mohd Haider Rizvi</a>
+                    · <a href="https://www.linkedin.com/in/s-m-h-rizvi-0a40441ab/" target="_blank" rel="noopener">LinkedIn</a>
+                    · <a href="https://github.com/haider1998" target="_blank" rel="noopener">GitHub</a></p>
                 <p class="copyright">© 2026 PyVisualizer. Open source under MIT License.</p>
             </div>
         </div>

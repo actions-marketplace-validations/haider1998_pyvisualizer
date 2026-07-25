@@ -1,8 +1,5 @@
 name: 'PyVisualizer — Architecture Ground Truth'
-description: >-
-  Deterministic, AST-verified Python architecture diagrams and gates.
-  Self-heal a README diagram, post a PR architecture-change report, or fail the
-  build on new circular dependencies and layering violations.
+description: 'Python architecture ground truth for CI: self-healing README diagrams, PR diffs, and circular-dependency gates.'
 author: 'Syed Mohd Haider Rizvi'
 branding:
   icon: 'git-merge'

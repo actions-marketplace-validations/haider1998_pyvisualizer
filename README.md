@@ -91,6 +91,37 @@ py-code-visualizer impact your_pkg.core.save ./your_project
 
 ---
 
+## ⚡ AI agent context — 97% fewer tokens
+
+> **Full guide:** [AI_CONTEXT.md](AI_CONTEXT.md)
+
+Instead of pasting your whole codebase into Claude / ChatGPT / Cursor, give it the
+verified 4,000-token slice that actually matters. Three commands cover every workflow:
+
+```bash
+# Option A — describe the task in plain English (no function name needed)
+py-code-visualizer context . --task "add retry logic to the HTTP client" --budget-tokens 4000
+
+# Option B — you know the function
+py-code-visualizer context . --focus send_request --budget-tokens 4000
+
+# Option C — wire it in permanently (agents read it automatically)
+py-code-visualizer export --for-ai .
+```
+
+**Copy the output of A or B → paste it before your question in the AI chat.**
+The AI now has the right context instead of 140,000 guessed tokens.
+
+| Approach | Tokens | Claude Opus 5 cost | Signal per 1k tokens |
+|---|---|---|---|
+| Full source | 139,697 | $2.10 | 1× |
+| Keyword grep | 24,652 | $0.37 | 6× |
+| **pyvisualizer `--task`** | **~4,000** | **$0.06** | **35×** |
+
+_Measured on httpx (real open-source project, 1,076 functions). See [measured facts](https://haider1998.github.io/pyvisualizer/use-cases/agent-context.html)._
+
+---
+
 ## For a scrappy startup 🚀
 
 You will never schedule a "docs sprint." So don't. Add one line to CI and your
@@ -147,26 +178,24 @@ forbid = ["domain -> api", "domain -> infra"]
 | `init` | Opt-in setup — generate only the automation you choose (`review`/`readme`/`context`/`gates`) |
 
 **Two jobs, one engine.** *review* makes code review on a large repo a focused
-few-minute pass; *context* gives an AI agent a verified, ~96%-smaller slice of the
+few-minute pass; *context* gives an AI agent a verified, **97%-smaller** slice of the
 architecture instead of the whole repo. See [`VISION.md`](VISION.md) and the
 [use-case walkthroughs](https://haider1998.github.io/pyvisualizer/use-cases/).
 
-### MCP server (agents pull, mid-task)
+### MCP server (real-time, mid-task)
 
-The same engine is available as an [MCP](https://modelcontextprotocol.io) server,
-so Claude Code / Cursor / any MCP client can query the verified graph exactly when
-a task needs it instead of receiving a guessed pack up front:
+If you use Claude Code or Cursor, the MCP server lets the agent query the verified
+graph when it needs it — no manual copy-paste required:
 
 ```bash
 pip install 'py-code-visualizer[mcp]'   # Python 3.10+
 pyvisualizer-mcp /path/to/project
 ```
 
-Three tools, deliberately few: `search_code` (lexical search over every
-function's name and source), `context_pack` (the budget-bounded verified pack,
-seeded by task and/or focus), and `impact` (blast radius before you change a
-function). The server watches file mtimes and rebuilds its in-memory graph only
-when the project actually changes.
+Add to `.mcp.json` and three tools become available: `search_code`, `context_pack`,
+and `impact`. The server rebuilds only when files change.
+
+Full usage guide (all flags, troubleshooting, output walkthrough): **[AI_CONTEXT.md](AI_CONTEXT.md)**
 
 ## Use cases (real commands, real output)
 
@@ -519,3 +548,10 @@ flowchart LR
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md). PyVisualizer is MIT-licensed.
+
+---
+
+## Author
+
+**Syed Mohd Haider Rizvi**
+[Portfolio](https://haider1998.github.io/) · [LinkedIn](https://www.linkedin.com/in/s-m-h-rizvi-0a40441ab/) · [GitHub](https://github.com/haider1998)

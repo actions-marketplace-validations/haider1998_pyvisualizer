@@ -47,6 +47,7 @@ from pyvisualizer.retrieval import (
 _CHARS_PER_TOKEN = 4  # rough, provider-agnostic estimate; explicitly labeled
 _SEED_COUNT = 5  # a shortlist recovers from a wrong guess; a single seed cannot
 _MAX_BODY_NODES = 10
+_TOKENS_PER_EDGE = 25  # estimated token cost per call-edge line in the pack (~92 chars avg)
 
 _STRATEGIES = ("graph", "text", "hybrid")
 
@@ -271,9 +272,16 @@ def _select_nodes(
     exempt_list = focus_list if exempt is None else sorted(set(exempt))
 
     selected: List[str] = []
+    selected_set: set = set()
     tokens = 0
     for n, is_exempt in _rank_candidates(G, focus_list, exempt_list, pr):
-        c = _est_tokens(_node_line(G, n, top, repo_url))
+        sig_c = _est_tokens(_node_line(G, n, top, repo_url))
+        # Each new edge to an already-selected node adds ~_TOKENS_PER_EDGE to the
+        # pack's Verified calls section — count it now so the budget is honest.
+        edge_c = _TOKENS_PER_EDGE * len(
+            (set(G.predecessors(n)) | set(G.successors(n))) & selected_set
+        )
+        c = sig_c + edge_c
         if not is_exempt and tokens + c > budget_tokens:
             # Skip this one and keep going: a single unusually long signature
             # must not halt the fill while cheaper, equally relevant functions
@@ -281,6 +289,7 @@ def _select_nodes(
             # of their budget.)
             continue
         selected.append(n)
+        selected_set.add(n)
         tokens += c
     return selected
 
@@ -299,13 +308,25 @@ def _select_text(
     everything else is budget-checked with the same skip-and-continue rule.
     Returns the selection in ranking order.
     """
-    selected: List[str] = sorted(set(e for e in exempt if e in G))
-    chosen = set(selected)
-    tokens = sum(_est_tokens(_node_line(G, n, top, repo_url)) for n in selected)
+    selected: List[str] = []
+    chosen: set = set()
+    tokens = 0
+    for n in sorted(set(e for e in exempt if e in G)):
+        sig_c = _est_tokens(_node_line(G, n, top, repo_url))
+        edge_c = _TOKENS_PER_EDGE * len(
+            (set(G.predecessors(n)) | set(G.successors(n))) & chosen
+        )
+        selected.append(n)
+        chosen.add(n)
+        tokens += sig_c + edge_c
     for node, _score in ranked:
         if node in chosen:
             continue
-        c = _est_tokens(_node_line(G, node, top, repo_url))
+        sig_c = _est_tokens(_node_line(G, node, top, repo_url))
+        edge_c = _TOKENS_PER_EDGE * len(
+            (set(G.predecessors(node)) | set(G.successors(node))) & chosen
+        )
+        c = sig_c + edge_c
         if tokens + c > budget_tokens:
             continue
         chosen.add(node)
@@ -456,7 +477,12 @@ def build_context_pack(
     if include_bodies:
         focus_out_set = set(focus_out)
         focus_sigs = [n for n in selection if n in focus_out_set]
+        focus_sigs_set = set(focus_sigs)
         spent = sum(_est_tokens(_node_line(G, n, top, repo_url)) for n in focus_sigs)
+        # Include edges between focus/seed nodes so the body budget isn't over-estimated.
+        spent += _TOKENS_PER_EDGE * sum(
+            1 for s, t in G.edges() if s in focus_sigs_set and t in focus_sigs_set
+        )
         bodies = _upgrade_bodies(G, focus_sigs, budget_tokens, spent)
         if bodies:
             body_cost = sum(_est_tokens(src) for src in bodies.values())

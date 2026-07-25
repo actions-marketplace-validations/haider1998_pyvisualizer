@@ -165,6 +165,6 @@ py-code-visualizer context . --from-git origin/main        # everything the PR c
 ```
 
 The pack contains verified signatures, call edges (with confidence + `file:line`),
-and any cycles touching the focus — roughly **96% fewer tokens** than the whole
+and any cycles touching the focus — **97% fewer tokens** than the whole
 source on a large project, with no guessed edges. Point your agent at the graph,
 not the repo — deterministic ground truth, not a guess.

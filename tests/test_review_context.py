@@ -20,76 +20,8 @@ from pyvisualizer.changes import (
 from pyvisualizer.context import build_context_pack, render_pack_json, render_pack_markdown
 from pyvisualizer.review import analyze_review, render_markdown, render_text
 
-_BEFORE = {
-    "core.py": (
-        "def persist(record):\n"
-        "    validated = validate(record)\n"
-        "    return _write(validated)\n\n"
-        "def validate(record):\n"
-        "    return record\n\n"
-        "def _write(record):\n"
-        "    return {'stored': record}\n"
-    ),
-    "service.py": (
-        "from core import persist\n\n"
-        "def place_order(order):\n"
-        "    return persist(order)\n\n"
-        "def audit(record):\n"
-        "    return {'audited': record}\n"
-    ),
-    "handlers.py": (
-        "from service import place_order\n\n"
-        "def create(request):\n"
-        "    return place_order(request)\n"
-    ),
-}
-
-# The "after" state adds an audit() hook to persist() and makes audit() call
-# persist() back — introducing a cycle and changing two functions.
-_AFTER_CORE = (
-    "from service import audit\n\n"
-    "def persist(record):\n"
-    "    validated = validate(record)\n"
-    "    audit(validated)\n"
-    "    return _write(validated)\n\n"
-    "def validate(record):\n"
-    "    return record\n\n"
-    "def _write(record):\n"
-    "    return {'stored': record}\n"
-)
-_AFTER_SERVICE = (
-    "from core import persist\n\n"
-    "def place_order(order):\n"
-    "    return persist(order)\n\n"
-    "def audit(record):\n"
-    "    return persist({'audit': record})\n"
-)
-
-
-def _git(root, *args):
-    subprocess.run(["git", "-C", root, *args], check=True, capture_output=True, text=True)
-
-
-@pytest.fixture
-def repo_before_after():
-    """A git repo committed at 'before', with the working tree at 'after'."""
-    tmp = tempfile.mkdtemp()
-    _git(tmp, "init")
-    _git(tmp, "config", "user.email", "t@t.com")
-    _git(tmp, "config", "user.name", "t")
-    _git(tmp, "remote", "add", "origin", "git@github.com:acme/demo.git")
-    for name, code in _BEFORE.items():
-        with open(os.path.join(tmp, name), "w", encoding="utf-8") as f:
-            f.write(code)
-    _git(tmp, "add", "-A")
-    _git(tmp, "commit", "-m", "before")
-    _git(tmp, "branch", "-M", "main")
-    # Apply the "after" state to the working tree (uncommitted).
-    with open(os.path.join(tmp, "core.py"), "w", encoding="utf-8") as f:
-        f.write(_AFTER_CORE)
-    with open(os.path.join(tmp, "service.py"), "w", encoding="utf-8") as f:
-        f.write(_AFTER_SERVICE)
-    return tmp
+# The repo_before_after fixture (and its _BEFORE/_AFTER file contents) lives in
+# tests/conftest.py so retrieval and MCP tests can share it.
 
 
 class TestChangeDetection:
@@ -293,3 +225,128 @@ class TestBudgetIsRespected:
         pack = build_context_pack(result, focus=["hub"], budget_tokens=90)
         assert "mod.minnow_one" in pack.included and "mod.minnow_two" in pack.included
         assert "mod.whale" not in pack.included
+
+
+class TestTaskContext:
+    """--task: a prose description seeds the pack (symbols first, lexical next)."""
+
+    def test_task_finds_the_relevant_functions(self, repo_before_after):
+        result = build_graph(repo_before_after)
+        pack = build_context_pack(
+            result, task="fix `persist` so audit runs before the write", budget_tokens=2000
+        )
+        assert pack.strategy == "hybrid"
+        assert "core.persist" in pack.included
+        assert pack.seeds and pack.seeds[0]["node"] == "core.persist"
+        assert pack.seeds[0]["source"] == "symbol"
+        md = render_pack_markdown(pack)
+        assert "- Task: fix `persist`" in md
+        assert "## Seeds" in md
+
+    def test_task_pack_is_deterministic(self, repo_before_after):
+        result = build_graph(repo_before_after)
+        md = [
+            render_pack_markdown(
+                build_context_pack(result, task="audit the persisted record flow")
+            )
+            for _ in range(2)
+        ]
+        assert md[0] == md[1]
+
+    def test_task_without_usable_seeds_falls_back_labeled(self, repo_before_after):
+        result = build_graph(repo_before_after)
+        pack = build_context_pack(result, task="qqzz blorptastic unrelatedwords")
+        assert pack.included, "a non-empty graph must never produce an empty pack"
+        assert pack.fallback_used
+        assert "Fallback" in render_pack_markdown(pack)
+
+    def test_text_strategy_skips_graph_expansion(self, repo_before_after):
+        result = build_graph(repo_before_after)
+        pack = build_context_pack(
+            result, task="persist validate record", strategy="text", budget_tokens=2000
+        )
+        assert pack.strategy == "text"
+        assert "core.persist" in pack.included
+
+    def test_strategy_without_task_is_an_error(self, repo_before_after):
+        result = build_graph(repo_before_after)
+        with pytest.raises(ValueError):
+            build_context_pack(result, focus=["persist"], strategy="hybrid")
+
+    def test_unknown_strategy_is_an_error(self, repo_before_after):
+        result = build_graph(repo_before_after)
+        with pytest.raises(ValueError):
+            build_context_pack(result, task="x", strategy="grep")
+
+    def test_multi_seed_pagerank_scores_all_seeds(self):
+        import networkx as nx
+
+        from pyvisualizer.context import personalized_pagerank
+
+        G = nx.DiGraph()
+        G.add_edge("a.one", "a.two")
+        G.add_edge("b.three", "a.one")
+        G.add_node("z.isolated")
+        pr = personalized_pagerank(G, ["a.one", "b.three"])
+        assert pr["a.one"] > 0 and pr["b.three"] > 0
+        assert pr["z.isolated"] == 0.0
+
+    def test_cli_task_end_to_end(self, repo_before_after, capsys):
+        from pyvisualizer.cli import main
+
+        rc = main(["context", repo_before_after, "--task", "fix `persist` audit ordering"])
+        assert rc == 0
+        out = capsys.readouterr().out
+        assert "# Context Pack" in out and "core.persist" in out
+
+
+class TestTieredBodies:
+    """Top-ranked focus/seed functions carry full source; the rest stay signatures."""
+
+    def test_focus_body_is_included_under_a_generous_budget(self, repo_before_after):
+        result = build_graph(repo_before_after)
+        pack = build_context_pack(result, focus=["persist"], budget_tokens=4000)
+        assert "core.persist" in pack.body_nodes
+        assert "def persist(record):" in pack.bodies["core.persist"]
+        md = render_pack_markdown(pack)
+        assert "## Function bodies" in md
+        assert "_(full source above)_" in md
+
+    def test_bodies_never_go_to_non_focus_functions(self, repo_before_after):
+        result = build_graph(repo_before_after)
+        pack = build_context_pack(result, focus=["persist"], budget_tokens=4000)
+        assert set(pack.body_nodes) <= set(pack.focus)
+
+    def test_include_bodies_false_restores_signature_only_shape(self, repo_before_after):
+        result = build_graph(repo_before_after)
+        pack = build_context_pack(result, focus=["persist"], include_bodies=False)
+        assert pack.body_nodes == [] and pack.bodies == {}
+        assert "## Function bodies" not in render_pack_markdown(pack)
+
+    def test_budget_covers_signatures_plus_bodies(self, tmp_path):
+        from pyvisualizer.context import _est_tokens
+
+        pkg = tmp_path / "wide"
+        pkg.mkdir()
+        callers = "\n\n".join(
+            f"def caller_{i}(argument_number_one, argument_number_two):\n    return hub()"
+            for i in range(60)
+        )
+        (pkg / "mod.py").write_text(f"def hub():\n    return 1\n\n\n{callers}\n")
+        result = build_graph(str(pkg))
+        budget = 200
+        pack = build_context_pack(result, focus=["hub"], budget_tokens=budget)
+        spent = sum(_est_tokens(line) for line in pack.rendered_nodes)
+        spent += sum(_est_tokens(src) for src in pack.bodies.values())
+        assert spent <= budget
+
+    def test_json_schema_v2_reports_tiers(self, repo_before_after):
+        import json as _json
+
+        result = build_graph(repo_before_after)
+        pack = build_context_pack(result, focus=["persist"], budget_tokens=4000)
+        data = _json.loads(render_pack_json(pack))
+        assert data["schema"] == "pyvisualizer/context@2"
+        assert set(data["tiers"]) == set(data["included"])
+        assert data["tiers"]["core.persist"] == "body"
+        assert data["fallback_used"] is False

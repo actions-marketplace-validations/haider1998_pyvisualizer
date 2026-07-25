@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "py-code-visualizer"
-version = "2.2.0"
+version = "2.3.0"
 description = "Deterministic, AST-verified architecture ground truth for Python — self-healing diagrams, CI gates, and interactive maps"
 readme = "README.md"
 license = {text = "MIT"}

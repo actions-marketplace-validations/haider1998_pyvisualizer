@@ -20,76 +20,8 @@ from pyvisualizer.changes import (
 from pyvisualizer.context import build_context_pack, render_pack_json, render_pack_markdown
 from pyvisualizer.review import analyze_review, render_markdown, render_text
 
-_BEFORE = {
-    "core.py": (
-        "def persist(record):\n"
-        "    validated = validate(record)\n"
-        "    return _write(validated)\n\n"
-        "def validate(record):\n"
-        "    return record\n\n"
-        "def _write(record):\n"
-        "    return {'stored': record}\n"
-    ),
-    "service.py": (
-        "from core import persist\n\n"
-        "def place_order(order):\n"
-        "    return persist(order)\n\n"
-        "def audit(record):\n"
-        "    return {'audited': record}\n"
-    ),
-    "handlers.py": (
-        "from service import place_order\n\n"
-        "def create(request):\n"
-        "    return place_order(request)\n"
-    ),
-}
-
-# The "after" state adds an audit() hook to persist() and makes audit() call
-# persist() back — introducing a cycle and changing two functions.
-_AFTER_CORE = (
-    "from service import audit\n\n"
-    "def persist(record):\n"
-    "    validated = validate(record)\n"
-    "    audit(validated)\n"
-    "    return _write(validated)\n\n"
-    "def validate(record):\n"
-    "    return record\n\n"
-    "def _write(record):\n"
-    "    return {'stored': record}\n"
-)
-_AFTER_SERVICE = (
-    "from core import persist\n\n"
-    "def place_order(order):\n"
-    "    return persist(order)\n\n"
-    "def audit(record):\n"
-    "    return persist({'audit': record})\n"
-)
-
-
-def _git(root, *args):
-    subprocess.run(["git", "-C", root, *args], check=True, capture_output=True, text=True)
-
-
-@pytest.fixture
-def repo_before_after():
-    """A git repo committed at 'before', with the working tree at 'after'."""
-    tmp = tempfile.mkdtemp()
-    _git(tmp, "init")
-    _git(tmp, "config", "user.email", "t@t.com")
-    _git(tmp, "config", "user.name", "t")
-    _git(tmp, "remote", "add", "origin", "git@github.com:acme/demo.git")
-    for name, code in _BEFORE.items():
-        with open(os.path.join(tmp, name), "w", encoding="utf-8") as f:
-            f.write(code)
-    _git(tmp, "add", "-A")
-    _git(tmp, "commit", "-m", "before")
-    _git(tmp, "branch", "-M", "main")
-    # Apply the "after" state to the working tree (uncommitted).
-    with open(os.path.join(tmp, "core.py"), "w", encoding="utf-8") as f:
-        f.write(_AFTER_CORE)
-    with open(os.path.join(tmp, "service.py"), "w", encoding="utf-8") as f:
-        f.write(_AFTER_SERVICE)
-    return tmp
+# The repo_before_after fixture (and its _BEFORE/_AFTER file contents) lives in
+# tests/conftest.py so retrieval and MCP tests can share it.
 
 
 class TestChangeDetection:
@@ -168,7 +100,7 @@ class TestContext:
         result = build_graph(repo_before_after)
         pack = build_context_pack(result, focus=["persist"])
         data = json.loads(render_pack_json(pack))
-        assert data["schema"] == "pyvisualizer/context@1"
+        assert data["schema"] == "pyvisualizer/context@2"
         assert "core.persist" in data["included"]
 
     def test_from_git_focus(self, repo_before_after):
@@ -176,3 +108,245 @@ class TestContext:
         pack = build_context_pack(result, from_git="main")
         assert "core.persist" in pack.focus
         assert "service.audit" in pack.focus
+
+
+class TestPageRankIsSelfContained:
+    """Guards the P0 bug where ranking silently degraded to alphabetical order.
+
+    ``nx.pagerank`` dispatches to SciPy, which is **not** a dependency of this
+    package. The old code caught the resulting ``ModuleNotFoundError`` and scored
+    every node 0.0, so the tie-break in ``_select_nodes`` fell back to sorting by
+    name and the pack filled with whatever came first in the alphabet — and the
+    output changed depending on whether NumPy happened to be installed.
+    """
+
+    def test_ranking_does_not_call_networkx_pagerank(self, monkeypatch):
+        """The ranking must not depend on NumPy/SciPy being importable at all."""
+        import networkx as nx
+
+        from pyvisualizer.context import personalized_pagerank
+
+        def _explode(*args, **kwargs):
+            raise AssertionError("nx.pagerank must not be used: it requires SciPy")
+
+        monkeypatch.setattr(nx, "pagerank", _explode)
+
+        G = nx.DiGraph([("a", "b"), ("b", "c"), ("x", "y")])
+        pr = personalized_pagerank(G, ["a"])
+        assert pr["a"] > 0.0
+        assert pr["b"] > 0.0
+        # A disconnected node is unreachable from the focus and scores exactly zero.
+        assert pr["y"] == 0.0
+
+    def test_pack_never_includes_functions_unreachable_from_focus(self, repo_before_after):
+        """Budget fill must not pad the pack with unrelated functions."""
+        import networkx as nx
+
+        result = build_graph(repo_before_after)
+        G = result.graph
+        pack = build_context_pack(result, focus=["persist"], budget_tokens=100000)
+        reachable = nx.node_connected_component(G.to_undirected(), pack.focus[0])
+        unrelated = [n for n in pack.included if n not in reachable]
+        assert unrelated == [], f"pack padded with unrelated functions: {unrelated}"
+
+    def test_ranking_is_stable_without_numpy(self, repo_before_after, monkeypatch):
+        """Same input, same pack — whether or not NumPy can be imported."""
+        import builtins
+
+        result = build_graph(repo_before_after)
+        with_numpy = render_pack_markdown(build_context_pack(result, focus=["persist"]))
+
+        real_import = builtins.__import__
+
+        def _no_numpy(name, *args, **kwargs):
+            if name.split(".")[0] in {"numpy", "scipy"}:
+                raise ModuleNotFoundError(f"No module named {name!r}")
+            return real_import(name, *args, **kwargs)
+
+        monkeypatch.setattr(builtins, "__import__", _no_numpy)
+        without_numpy = render_pack_markdown(build_context_pack(result, focus=["persist"]))
+        assert with_numpy == without_numpy
+
+
+class TestBudgetIsRespected:
+    """`--budget-tokens N` is a promise, and it used to be broken both ways.
+
+    Measured across 322 real SWE-bench repositories at a 4,000-token budget, the
+    old selection landed inside 75-100% of budget only 7% of the time: 16% of
+    packs overran (worst case 52,615 tokens — 13x the request) because focus
+    neighbours were added with no budget check at all, and 77% came in under 75%
+    because the fill stopped at the first function too large to fit instead of
+    skipping it.
+    """
+
+    def _wide_graph(self, tmp_path):
+        """A hub with many neighbours — the shape that caused the 13x overrun."""
+        pkg = tmp_path / "wide"
+        pkg.mkdir()
+        callers = "\n\n".join(
+            f"def caller_{i}(argument_number_one, argument_number_two):\n    return hub()"
+            for i in range(60)
+        )
+        (pkg / "mod.py").write_text(f"def hub():\n    return 1\n\n\n{callers}\n")
+        return str(pkg)
+
+    def test_pack_does_not_exceed_budget(self, tmp_path):
+        """Budget governs function selection, which is what it is spent on."""
+        from pyvisualizer.context import _est_tokens
+
+        result = build_graph(self._wide_graph(tmp_path))
+        budget = 200
+        pack = build_context_pack(result, focus=["hub"], budget_tokens=budget)
+        spent = sum(_est_tokens(line) for line in pack.rendered_nodes)
+        assert spent <= budget, (
+            f"pack spent {spent} tokens against a {budget} budget "
+            f"({len(pack.included)} functions)"
+        )
+
+    def test_focus_survives_an_impossible_budget(self, tmp_path):
+        """The one thing that may exceed budget is what the caller asked for."""
+        result = build_graph(self._wide_graph(tmp_path))
+        pack = build_context_pack(result, focus=["hub"], budget_tokens=1)
+        assert "mod.hub" in pack.included
+
+    def test_fill_skips_an_oversized_entry_instead_of_stopping(self, tmp_path):
+        """One huge signature must not halt the fill while cheap nodes remain."""
+        pkg = tmp_path / "mixed"
+        pkg.mkdir()
+        huge_args = ", ".join(f"parameter_with_a_very_long_name_{i}" for i in range(40))
+        (pkg / "mod.py").write_text(
+            "def hub():\n    return whale() or minnow_one() or minnow_two()\n\n"
+            f"def whale({huge_args}):\n    return 1\n\n"
+            "def minnow_one():\n    return 1\n\n"
+            "def minnow_two():\n    return 1\n"
+        )
+        result = build_graph(str(pkg))
+        # Enough budget for the small functions, not for the whale.
+        pack = build_context_pack(result, focus=["hub"], budget_tokens=90)
+        assert "mod.minnow_one" in pack.included and "mod.minnow_two" in pack.included
+        assert "mod.whale" not in pack.included
+
+
+class TestTaskContext:
+    """--task: a prose description seeds the pack (symbols first, lexical next)."""
+
+    def test_task_finds_the_relevant_functions(self, repo_before_after):
+        result = build_graph(repo_before_after)
+        pack = build_context_pack(
+            result, task="fix `persist` so audit runs before the write", budget_tokens=2000
+        )
+        assert pack.strategy == "hybrid"
+        assert "core.persist" in pack.included
+        assert pack.seeds and pack.seeds[0]["node"] == "core.persist"
+        assert pack.seeds[0]["source"] == "symbol"
+        md = render_pack_markdown(pack)
+        assert "- Task: fix `persist`" in md
+        assert "## Seeds" in md
+
+    def test_task_pack_is_deterministic(self, repo_before_after):
+        result = build_graph(repo_before_after)
+        md = [
+            render_pack_markdown(
+                build_context_pack(result, task="audit the persisted record flow")
+            )
+            for _ in range(2)
+        ]
+        assert md[0] == md[1]
+
+    def test_task_without_usable_seeds_falls_back_labeled(self, repo_before_after):
+        result = build_graph(repo_before_after)
+        pack = build_context_pack(result, task="qqzz blorptastic unrelatedwords")
+        assert pack.included, "a non-empty graph must never produce an empty pack"
+        assert pack.fallback_used
+        assert "Fallback" in render_pack_markdown(pack)
+
+    def test_text_strategy_skips_graph_expansion(self, repo_before_after):
+        result = build_graph(repo_before_after)
+        pack = build_context_pack(
+            result, task="persist validate record", strategy="text", budget_tokens=2000
+        )
+        assert pack.strategy == "text"
+        assert "core.persist" in pack.included
+
+    def test_strategy_without_task_is_an_error(self, repo_before_after):
+        result = build_graph(repo_before_after)
+        with pytest.raises(ValueError):
+            build_context_pack(result, focus=["persist"], strategy="hybrid")
+
+    def test_unknown_strategy_is_an_error(self, repo_before_after):
+        result = build_graph(repo_before_after)
+        with pytest.raises(ValueError):
+            build_context_pack(result, task="x", strategy="grep")
+
+    def test_multi_seed_pagerank_scores_all_seeds(self):
+        import networkx as nx
+
+        from pyvisualizer.context import personalized_pagerank
+
+        G = nx.DiGraph()
+        G.add_edge("a.one", "a.two")
+        G.add_edge("b.three", "a.one")
+        G.add_node("z.isolated")
+        pr = personalized_pagerank(G, ["a.one", "b.three"])
+        assert pr["a.one"] > 0 and pr["b.three"] > 0
+        assert pr["z.isolated"] == 0.0
+
+    def test_cli_task_end_to_end(self, repo_before_after, capsys):
+        from pyvisualizer.cli import main
+
+        rc = main(["context", repo_before_after, "--task", "fix `persist` audit ordering"])
+        assert rc == 0
+        out = capsys.readouterr().out
+        assert "# Context Pack" in out and "core.persist" in out
+
+
+class TestTieredBodies:
+    """Top-ranked focus/seed functions carry full source; the rest stay signatures."""
+
+    def test_focus_body_is_included_under_a_generous_budget(self, repo_before_after):
+        result = build_graph(repo_before_after)
+        pack = build_context_pack(result, focus=["persist"], budget_tokens=4000)
+        assert "core.persist" in pack.body_nodes
+        assert "def persist(record):" in pack.bodies["core.persist"]
+        md = render_pack_markdown(pack)
+        assert "## Function bodies" in md
+        assert "_(full source above)_" in md
+
+    def test_bodies_never_go_to_non_focus_functions(self, repo_before_after):
+        result = build_graph(repo_before_after)
+        pack = build_context_pack(result, focus=["persist"], budget_tokens=4000)
+        assert set(pack.body_nodes) <= set(pack.focus)
+
+    def test_include_bodies_false_restores_signature_only_shape(self, repo_before_after):
+        result = build_graph(repo_before_after)
+        pack = build_context_pack(result, focus=["persist"], include_bodies=False)
+        assert pack.body_nodes == [] and pack.bodies == {}
+        assert "## Function bodies" not in render_pack_markdown(pack)
+
+    def test_budget_covers_signatures_plus_bodies(self, tmp_path):
+        from pyvisualizer.context import _est_tokens
+
+        pkg = tmp_path / "wide"
+        pkg.mkdir()
+        callers = "\n\n".join(
+            f"def caller_{i}(argument_number_one, argument_number_two):\n    return hub()"
+            for i in range(60)
+        )
+        (pkg / "mod.py").write_text(f"def hub():\n    return 1\n\n\n{callers}\n")
+        result = build_graph(str(pkg))
+        budget = 200
+        pack = build_context_pack(result, focus=["hub"], budget_tokens=budget)
+        spent = sum(_est_tokens(line) for line in pack.rendered_nodes)
+        spent += sum(_est_tokens(src) for src in pack.bodies.values())
+        assert spent <= budget
+
+    def test_json_schema_v2_reports_tiers(self, repo_before_after):
+        import json as _json
+
+        result = build_graph(repo_before_after)
+        pack = build_context_pack(result, focus=["persist"], budget_tokens=4000)
+        data = _json.loads(render_pack_json(pack))
+        assert data["schema"] == "pyvisualizer/context@2"
+        assert set(data["tiers"]) == set(data["included"])
+        assert data["tiers"]["core.persist"] == "body"
+        assert data["fallback_used"] is False

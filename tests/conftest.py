@@ -1,6 +1,7 @@
 """PyVisualizer test configuration."""
 
 import os
+import subprocess
 import tempfile
 from pathlib import Path
 
@@ -79,3 +80,81 @@ class UtilClass:
 """)
 
     return package_dir
+
+
+# --------------------------------------------------------------------------- #
+# A real throwaway git repository (not mocks) — shared by review/context/
+# retrieval/MCP tests so change detection and link generation are exercised the
+# way they run in production.
+# --------------------------------------------------------------------------- #
+
+_BEFORE = {
+    "core.py": (
+        "def persist(record):\n"
+        "    validated = validate(record)\n"
+        "    return _write(validated)\n\n"
+        "def validate(record):\n"
+        "    return record\n\n"
+        "def _write(record):\n"
+        "    return {'stored': record}\n"
+    ),
+    "service.py": (
+        "from core import persist\n\n"
+        "def place_order(order):\n"
+        "    return persist(order)\n\n"
+        "def audit(record):\n"
+        "    return {'audited': record}\n"
+    ),
+    "handlers.py": (
+        "from service import place_order\n\n"
+        "def create(request):\n"
+        "    return place_order(request)\n"
+    ),
+}
+
+# The "after" state adds an audit() hook to persist() and makes audit() call
+# persist() back — introducing a cycle and changing two functions.
+_AFTER_CORE = (
+    "from service import audit\n\n"
+    "def persist(record):\n"
+    "    validated = validate(record)\n"
+    "    audit(validated)\n"
+    "    return _write(validated)\n\n"
+    "def validate(record):\n"
+    "    return record\n\n"
+    "def _write(record):\n"
+    "    return {'stored': record}\n"
+)
+_AFTER_SERVICE = (
+    "from core import persist\n\n"
+    "def place_order(order):\n"
+    "    return persist(order)\n\n"
+    "def audit(record):\n"
+    "    return persist({'audit': record})\n"
+)
+
+
+def _git(root, *args):
+    subprocess.run(["git", "-C", root, *args], check=True, capture_output=True, text=True)
+
+
+@pytest.fixture
+def repo_before_after():
+    """A git repo committed at 'before', with the working tree at 'after'."""
+    tmp = tempfile.mkdtemp()
+    _git(tmp, "init")
+    _git(tmp, "config", "user.email", "t@t.com")
+    _git(tmp, "config", "user.name", "t")
+    _git(tmp, "remote", "add", "origin", "git@github.com:acme/demo.git")
+    for name, code in _BEFORE.items():
+        with open(os.path.join(tmp, name), "w", encoding="utf-8") as f:
+            f.write(code)
+    _git(tmp, "add", "-A")
+    _git(tmp, "commit", "-m", "before")
+    _git(tmp, "branch", "-M", "main")
+    # Apply the "after" state to the working tree (uncommitted).
+    with open(os.path.join(tmp, "core.py"), "w", encoding="utf-8") as f:
+        f.write(_AFTER_CORE)
+    with open(os.path.join(tmp, "service.py"), "w", encoding="utf-8") as f:
+        f.write(_AFTER_SERVICE)
+    return tmp

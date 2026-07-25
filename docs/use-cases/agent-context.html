@@ -97,8 +97,14 @@
 ## Circular dependencies touching this area
 - `persist → audit → persist`</div>
             <p>Every function is real, every call edge is parsed from the AST with a
-                <code>file:line</code>, and ambiguous calls are flagged rather than guessed. The agent
-                opens the cited line only when it needs a body — the pack itself stays tiny.</p>
+                <code>file:line</code>, and ambiguous calls are flagged rather than guessed. Full
+                source is included for the top-ranked focus functions while the budget allows
+                (<code>--no-bodies</code> to disable); the agent opens the cited line for the rest.</p>
+            <p style="margin-top:1rem">Don't know the function name yet? Describe the task instead —
+                <code>--task</code> maps the prose onto seed functions (symbols the task names first,
+                lexical matches as labeled hints) and expands them together through the verified
+                graph:</p>
+            <div class="uc-cmd"><span class="p">$</span> py-code-visualizer context . --task "orders must be audited before persisting" --budget-tokens 4000</div>
         </div>
 
         <div class="uc-step">
@@ -127,6 +133,10 @@
             <p>Wire it into CI with <code>py-code-visualizer export --check</code> (via
                 <code>init --with context</code>) so a PR fails if the committed ground truth goes
                 stale — the agent always reads current facts, never yesterday's.</p>
+            <p style="margin-top:1rem">Prefer tools the agent calls mid-task? The same engine runs as
+                an MCP server — Claude Code, Cursor, or any MCP client gets <code>search_code</code>,
+                <code>context_pack</code>, and <code>impact</code> against the live, verified graph:</p>
+            <div class="uc-cmd"><span class="p">$</span> pip install 'py-code-visualizer[mcp]' &amp;&amp; pyvisualizer-mcp .</div>
         </div>
 
         <div class="uc-benefit">

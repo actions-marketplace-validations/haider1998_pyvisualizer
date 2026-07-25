@@ -135,6 +135,7 @@ forbid = ["domain -> api", "domain -> infra"]
 |---|---|
 | `review <path> --base <ref>` | **PR review report**: changed functions, blast radius, risk flags, focused subgraph — clickable `file:line` on every reference |
 | `context <path> --focus <fn>` | **Verified context pack for AI agents**: task-scoped, budget-bounded, zero guessed edges |
+| `context <path> --task "<prose>"` | Same pack, seeded from a **natural-language task description** (named symbols first, lexical matches as labeled hints; `--strategy graph\|text\|hybrid`) |
 | `visualize` | Render `html` · `mermaid` · `json` · `c4` · `svg`/`png` |
 | `readme` | Inject/update a Mermaid diagram in any Markdown file (idempotent) + jump-to-source index |
 | `json` | Emit the canonical, diffable graph JSON |
@@ -149,6 +150,23 @@ forbid = ["domain -> api", "domain -> infra"]
 few-minute pass; *context* gives an AI agent a verified, ~96%-smaller slice of the
 architecture instead of the whole repo. See [`VISION.md`](VISION.md) and the
 [use-case walkthroughs](https://haider1998.github.io/pyvisualizer/use-cases/).
+
+### MCP server (agents pull, mid-task)
+
+The same engine is available as an [MCP](https://modelcontextprotocol.io) server,
+so Claude Code / Cursor / any MCP client can query the verified graph exactly when
+a task needs it instead of receiving a guessed pack up front:
+
+```bash
+pip install 'py-code-visualizer[mcp]'   # Python 3.10+
+pyvisualizer-mcp /path/to/project
+```
+
+Three tools, deliberately few: `search_code` (lexical search over every
+function's name and source), `context_pack` (the budget-bounded verified pack,
+seeded by task and/or focus), and `impact` (blast radius before you change a
+function). The server watches file mtimes and rebuilds its in-memory graph only
+when the project actually changes.
 
 ## Use cases (real commands, real output)
 
@@ -225,7 +243,7 @@ detail = "module"          # module | class | function
 
 - ⏳ **Time-travel** — scrub your architecture's evolution across releases
 - 🔁 **Watch mode** — live-reloading map while you refactor
-- 🔌 **MCP server** — `who_calls`, `what_breaks_if_i_change` as agent tools
+- ✅ ~~**MCP server**~~ — shipped: `pyvisualizer-mcp` (`search_code`, `context_pack`, `impact`)
 
 ## Architecture
 

@@ -138,6 +138,13 @@ def build_agents_block() -> str:
         "  `--from-git <base>`) to get a small, verified pack of just the functions",
         "  your task touches, their callers/callees, and any cycles — far fewer",
         "  tokens than reading the whole repo.",
+        "- **Starting from a prose task?** Run",
+        '  `py-code-visualizer context --task "<what you are about to do>"` —',
+        "  it maps the description onto seed functions and expands them through",
+        "  the verified graph (lexical seeds are labeled as hints).",
+        "- **MCP:** this graph is also available as an MCP server —",
+        "  `pyvisualizer-mcp <path>` (tools: `search_code`, `context_pack`,",
+        "  `impact`; install with `pip install 'py-code-visualizer[mcp]'`).",
         "- Ambiguous calls are flagged, never guessed; trust the confidence field.",
         AGENTS_END,
     ]

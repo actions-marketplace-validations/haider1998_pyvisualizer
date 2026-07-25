@@ -91,6 +91,37 @@ py-code-visualizer impact your_pkg.core.save ./your_project
 
 ---
 
+## ⚡ AI agent context — 97% fewer tokens
+
+> **Full guide:** [AI_CONTEXT.md](AI_CONTEXT.md)
+
+Instead of pasting your whole codebase into Claude / ChatGPT / Cursor, give it the
+verified 4,000-token slice that actually matters. Three commands cover every workflow:
+
+```bash
+# Option A — describe the task in plain English (no function name needed)
+py-code-visualizer context . --task "add retry logic to the HTTP client" --budget-tokens 4000
+
+# Option B — you know the function
+py-code-visualizer context . --focus send_request --budget-tokens 4000
+
+# Option C — wire it in permanently (agents read it automatically)
+py-code-visualizer export --for-ai .
+```
+
+**Copy the output of A or B → paste it before your question in the AI chat.**
+The AI now has the right context instead of 140,000 guessed tokens.
+
+| Approach | Tokens | Claude Opus 5 cost | Signal per 1k tokens |
+|---|---|---|---|
+| Full source | 139,697 | $2.10 | 1× |
+| Keyword grep | 24,652 | $0.37 | 6× |
+| **pyvisualizer `--task`** | **~4,000** | **$0.06** | **35×** |
+
+_Measured on httpx (real open-source project, 1,076 functions). See [measured facts](https://haider1998.github.io/pyvisualizer/use-cases/agent-context.html)._
+
+---
+
 ## For a scrappy startup 🚀
 
 You will never schedule a "docs sprint." So don't. Add one line to CI and your
@@ -151,38 +182,20 @@ few-minute pass; *context* gives an AI agent a verified, **97%-smaller** slice o
 architecture instead of the whole repo. See [`VISION.md`](VISION.md) and the
 [use-case walkthroughs](https://haider1998.github.io/pyvisualizer/use-cases/).
 
-### Token cost savings — measured on a real codebase
+### MCP server (real-time, mid-task)
 
-Evaluated on **httpx** (real open-source Python project, 1,076 functions across 60 files):
-
-| | Tokens consumed | Cost per task (Claude Opus 5) | Relevant-code signal per token |
-|---|---|---|---|
-| Feed the full source | 139,697 | **$2.10** | 1× (baseline) |
-| Keyword grep | 24,652 | $0.37 | 6× |
-| **pyvisualizer `--task`** | **~4,000** | **$0.06** | **35×** |
-
-97% token reduction. 35× more signal per token. Every function in the pack carries a `file:line` — no hallucination, no re-derivation.
-
-> _Costs use publicly listed input-token pricing. Pack tokens from `--budget-tokens 4000`; full-source tokens counted across all .py files. Exact prices vary by model and tier._
-
-`--task` also works with Claude Sonnet 5, GPT-4o, and Gemini — the 97% saving is model-agnostic; the dollar amounts scale with model price.
-
-### MCP server (agents pull, mid-task)
-
-The same engine is available as an [MCP](https://modelcontextprotocol.io) server,
-so Claude Code / Cursor / any MCP client can query the verified graph exactly when
-a task needs it instead of receiving a guessed pack up front:
+If you use Claude Code or Cursor, the MCP server lets the agent query the verified
+graph when it needs it — no manual copy-paste required:
 
 ```bash
 pip install 'py-code-visualizer[mcp]'   # Python 3.10+
 pyvisualizer-mcp /path/to/project
 ```
 
-Three tools, deliberately few: `search_code` (lexical search over every
-function's name and source), `context_pack` (the budget-bounded verified pack,
-seeded by task and/or focus), and `impact` (blast radius before you change a
-function). The server watches file mtimes and rebuilds its in-memory graph only
-when the project actually changes.
+Add to `.mcp.json` and three tools become available: `search_code`, `context_pack`,
+and `impact`. The server rebuilds only when files change.
+
+Full usage guide (all flags, troubleshooting, output walkthrough): **[AI_CONTEXT.md](AI_CONTEXT.md)**
 
 ## Use cases (real commands, real output)
 

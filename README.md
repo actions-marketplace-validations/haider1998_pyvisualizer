@@ -527,3 +527,10 @@ flowchart LR
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md). PyVisualizer is MIT-licensed.
+
+---
+
+## Author
+
+**Syed Mohd Haider Rizvi**
+[Portfolio](https://haider1998.github.io/) · [LinkedIn](https://www.linkedin.com/in/s-m-h-rizvi-0a40441ab/) · [GitHub](https://github.com/haider1998)

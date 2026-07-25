@@ -11,8 +11,6 @@ per-file-ignores =
     tests/*: E501, F401, W293
 exclude =
     .venv,
-    # Cloned third-party repositories for experiments — never ours to lint.
-    experiments/.cache,
     build,
     dist,
     docs

@@ -162,7 +162,3 @@ CLAUDE.md
 .Trashes
 ehthumbs.db
 Thumbs.db
-
-# Experiment working data: cloned third-party repos, per-run checkouts and venvs.
-# Results under experiments/results/ ARE committed — they are the evidence.
-experiments/.cache/

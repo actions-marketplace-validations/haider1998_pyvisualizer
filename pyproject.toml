@@ -109,7 +109,6 @@ exclude = '''
     | \.venv
     | build
     | dist
-    | experiments/\.cache
 )/
 '''
 

@@ -490,7 +490,14 @@ def build_context_pack(
                 }
             )
 
-    cycles = [c for c in find_cycles(G) if included_set & set(c)]
+    cycles: List[List[str]] = []
+    for c in find_cycles(G):
+        if included_set & set(c):
+            # Rotate to the lexicographically smallest node so the rendered
+            # chain is identical run-to-run (simple_cycles' start node isn't).
+            i = c.index(min(c))
+            cycles.append(list(c[i:]) + list(c[:i]))
+    cycles.sort()
     rendered_nodes = [_node_line(G, n, top, repo_url) for n in included]
 
     pack = ContextPack(

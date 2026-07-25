@@ -1,4 +1,30 @@
-# py-code-visualizer 2.0 — The Ground Truth Engine
+# py-code-visualizer 2.3 — Hybrid Context Engine + MCP Server
+
+*Query the verified graph mid-task, or seed a pack from prose. Multiple strategies, multiple delivery mechanisms, zero hallucination.*
+
+---
+
+## What's new in 2.3
+
+### `--task`: Prose-seeded context packs
+Instead of naming a function, describe what you're about to do. `context --task "<prose>"` derives a multi-seed shortlist (named symbols first, lexical matches second) and expands them together through personalized PageRank. Multi-seed expansion recovers from wrong guesses — the old single-seed design couldn't.
+
+### Tiered source bodies
+Packs now include full source for focus/seed functions (within budget), signatures for the rest. `--no-bodies` to restore the old shape.
+
+### MCP server
+`pyvisualizer-mcp` serves three pull-model tools (`search_code`, `context_pack`, `impact`) over stdio. Claude Code, Cursor, and any MCP client can query the verified graph exactly when a task needs it. Optional `[mcp]` extra, Python 3.10+.
+
+### Also fixed
+- Cherry-picked two real bugs from the experimental branch: PageRank now works without SciPy (was silently falling back to alphabetical), and `--budget-tokens` is now actually honored (~7% of packs were violating it).
+- Cycle rendering is now deterministic (rotation wasn't canonicalized).
+
+### No new claims yet
+Per pre-registered gate: the new hybrid ranking stays behind `--task`/`--strategy` with no quality claims until it beats plain BM25-alone on function-recall per 1k tokens in a harness rerun.
+
+---
+
+## 2.0 — The Ground Truth Engine
 
 *A manifesto, not a changelog.*
 

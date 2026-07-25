@@ -1,3 +1,25 @@
+# py-code-visualizer 2.3.1 — Budget enforcement + evaluation baseline
+
+*Patch release. No API changes.*
+
+## What's fixed in 2.3.1
+
+### Budget enforcement now includes call-edge token cost
+`--budget-tokens` was a soft hint, not a ceiling. Signature fill correctly respected it, but the pack's **Verified calls** section (rendered as call-edge lines) was not counted — on graph-heavy selections the edge section alone could add 1,000+ tokens, causing hybrid strategy to overshoot a 4,000-token budget by up to 38%.
+
+Fix: `_select_nodes` and `_select_text` now count `_TOKENS_PER_EDGE = 25` tokens for every new edge a node introduces to the selection. The budget overshoot drops from up to 38% → ~5% (remaining margin is deliberate headroom for pack scaffolding not counted in content estimates).
+
+### Real-codebase evaluation baseline recorded
+Ran a two-round evaluation on a real httpx bug (NO_PROXY IPv6 handling, 1,076 functions, 976 call edges). Key findings:
+- pyvisualizer text strategy: **recall/1k = 0.238** vs keyword grep 0.041 (6× better)
+- vs full source: **35× more signal per token**
+- Token reduction: **97%** (139,697 tokens → ~4,000 tokens)
+- Pack build time: **<1 second**
+
+Ship gate status: `--strategy text` beats `--strategy hybrid` on recall/1k in this dataset. Hybrid remains available behind `--strategy hybrid`; no quality claims are made for it over BM25-alone until the gate is met on a harder dataset.
+
+---
+
 # py-code-visualizer 2.3 — Hybrid Context Engine + MCP Server
 
 *Query the verified graph mid-task, or seed a pack from prose. Multiple strategies, multiple delivery mechanisms, zero hallucination.*

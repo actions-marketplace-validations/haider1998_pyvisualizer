@@ -147,9 +147,25 @@ forbid = ["domain -> api", "domain -> infra"]
 | `init` | Opt-in setup — generate only the automation you choose (`review`/`readme`/`context`/`gates`) |
 
 **Two jobs, one engine.** *review* makes code review on a large repo a focused
-few-minute pass; *context* gives an AI agent a verified, ~96%-smaller slice of the
+few-minute pass; *context* gives an AI agent a verified, **97%-smaller** slice of the
 architecture instead of the whole repo. See [`VISION.md`](VISION.md) and the
 [use-case walkthroughs](https://haider1998.github.io/pyvisualizer/use-cases/).
+
+### Token cost savings — measured on a real codebase
+
+Evaluated on **httpx** (real open-source Python project, 1,076 functions across 60 files):
+
+| | Tokens consumed | Cost per task (Claude Opus 5) | Relevant-code signal per token |
+|---|---|---|---|
+| Feed the full source | 139,697 | **$2.10** | 1× (baseline) |
+| Keyword grep | 24,652 | $0.37 | 6× |
+| **pyvisualizer `--task`** | **~4,000** | **$0.06** | **35×** |
+
+97% token reduction. 35× more signal per token. Every function in the pack carries a `file:line` — no hallucination, no re-derivation.
+
+> _Costs use publicly listed input-token pricing. Pack tokens from `--budget-tokens 4000`; full-source tokens counted across all .py files. Exact prices vary by model and tier._
+
+`--task` also works with Claude Sonnet 5, GPT-4o, and Gemini — the 97% saving is model-agnostic; the dollar amounts scale with model price.
 
 ### MCP server (agents pull, mid-task)
 

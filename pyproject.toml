@@ -65,13 +65,18 @@ dev = [
 graphviz = [
     "graphviz>=0.20.0",
 ]
+mcp = [
+    "mcp>=1.2.0; python_version >= '3.10'",
+]
 all = [
     "graphviz>=0.20.0",
+    "mcp>=1.2.0; python_version >= '3.10'",
 ]
 
 [project.scripts]
 py-code-visualizer = "pyvisualizer.cli:main"
 pyvisualizer = "pyvisualizer.cli:main"
+pyvisualizer-mcp = "pyvisualizer.mcp_server:main"
 
 [project.urls]
 Homepage = "https://github.com/haider1998/PyVisualizer"

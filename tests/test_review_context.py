@@ -168,7 +168,7 @@ class TestContext:
         result = build_graph(repo_before_after)
         pack = build_context_pack(result, focus=["persist"])
         data = json.loads(render_pack_json(pack))
-        assert data["schema"] == "pyvisualizer/context@1"
+        assert data["schema"] == "pyvisualizer/context@2"
         assert "core.persist" in data["included"]
 
     def test_from_git_focus(self, repo_before_after):

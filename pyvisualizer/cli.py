@@ -215,6 +215,20 @@ def _build_parser() -> argparse.ArgumentParser:
     pctx.add_argument("--focus", nargs="+", help="Function/class/file names to center the pack on")
     pctx.add_argument("--from-git", dest="from_git", help="Center on functions changed vs this ref")
     pctx.add_argument(
+        "--task",
+        help="Natural-language task description; seeded into the pack via text+graph retrieval",
+    )
+    pctx.add_argument(
+        "--strategy",
+        choices=["graph", "text", "hybrid"],
+        help="Seed/selection strategy (default: hybrid with --task, graph otherwise)",
+    )
+    pctx.add_argument(
+        "--no-bodies",
+        action="store_true",
+        help="Signatures only — omit the full-source section for top-ranked functions",
+    )
+    pctx.add_argument(
         "--budget-tokens", type=int, default=4000, help="Approx token budget for the pack"
     )
     pctx.add_argument("--output", "-o", help="Markdown output file (default: stdout)")
@@ -698,6 +712,9 @@ def cmd_context(args: argparse.Namespace) -> int:
         focus=getattr(args, "focus", None),
         from_git=getattr(args, "from_git", None),
         budget_tokens=args.budget_tokens,
+        task=getattr(args, "task", None),
+        strategy=getattr(args, "strategy", None),
+        include_bodies=not getattr(args, "no_bodies", False),
     )
     markdown = render_pack_markdown(pack)
     if args.output:

@@ -19,7 +19,8 @@ https://pypi.org/project/py-code-visualizer/
 
 ## Core commands
 - `py-code-visualizer review <path> --base <ref>` — PR review report: changed functions, blast radius, risk flags (hubs/new cycles/ambiguous calls), and a focused Mermaid subgraph, with a clickable file:line on every reference
-- `py-code-visualizer context <path> --focus <name>` — a verified, task-scoped context pack for AI agents (focus function + callers/callees + PageRank-selected neighbors under a token budget); `--from-git <ref>` focuses on a PR's changes
+- `py-code-visualizer context <path> --focus <name>` — a verified, task-scoped context pack for AI agents (focus function + callers/callees + PageRank-selected neighbors under a token budget); `--from-git <ref>` focuses on a PR's changes; `--task "<prose>"` seeds the pack from a natural-language task description (named symbols first, lexical BM25 matches as labeled hints; `--strategy graph|text|hybrid`); full source bodies are included for the top-ranked focus functions within budget (`--no-bodies` to disable)
+- `pyvisualizer-mcp <path>` — MCP server exposing the verified graph as agent tools: `search_code`, `context_pack`, `impact` (install extra: `pip install 'py-code-visualizer[mcp]'`, Python 3.10+)
 - `py-code-visualizer visualize <path>` — render html | mermaid | json | c4 | svg | png
 - `py-code-visualizer readme <path>` — inject/update a self-healing Mermaid diagram in README.md (idempotent), with a collapsed jump-to-source index
 - `py-code-visualizer json <path>` — emit the canonical, diffable graph JSON
@@ -32,7 +33,7 @@ https://pypi.org/project/py-code-visualizer/
 
 ## End-to-end use cases (each backed by a runnable fixture, real output)
 - Review a large-repo PR in minutes: `review --base origin/main` reports changed functions, blast radius, risk flags, and a focused subgraph; `init --with review` posts it as a PR comment. https://haider1998.github.io/pyvisualizer/use-cases/review-a-pr.html
-- Feed an AI agent verified context: `context --focus <fn>` builds a task-scoped pack (~96% fewer tokens than the whole source on a 100k-line project, zero guessed edges); `export --for-ai` wires AGENTS.md. https://haider1998.github.io/pyvisualizer/use-cases/agent-context.html
+- Feed an AI agent verified context: `context --focus <fn>` builds a task-scoped pack (~96% fewer tokens than the whole source on a 100k-line project, zero guessed edges); `context --task "<prose>"` seeds it from a task description; `pyvisualizer-mcp` serves the same engine as MCP tools agents can call mid-task; `export --for-ai` wires AGENTS.md. https://haider1998.github.io/pyvisualizer/use-cases/agent-context.html
 - Map an undocumented Python monolith: `visualize` + `health` + `check --dead-code`. Get a trustworthy map, an A–F grade, and a dead-code review list with no code executed. https://haider1998.github.io/pyvisualizer/use-cases/orphan-monolith.html
 - Architecture evidence for a SOC 2 audit: `check --layers api domain infra --forbid 'domain -> api'` fails CI with the exact file:line of a violating call; deterministic committed diagrams are a dated audit trail; single-file HTML makes zero network requests (air-gap safe). https://haider1998.github.io/pyvisualizer/use-cases/soc2-audit.html
 - Blast radius of a Python refactor: `impact <function>` shows transitive callers/callees; `diff base.json head.json --fail-on-new-cycles` fails a PR that introduces a circular dependency. https://haider1998.github.io/pyvisualizer/use-cases/fearless-refactor.html

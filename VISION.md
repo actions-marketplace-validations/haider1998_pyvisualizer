@@ -31,7 +31,14 @@ Everything this tool does serves exactly one of these:
 
 - **Job 2 — Verified agent context.** Hand an AI agent a compact, task-scoped,
   100%-verified slice of the architecture — fewer tokens, higher accuracy than
-  it could ever derive itself — and make sure it actually uses it.
+  it could ever derive itself — and make sure it actually uses it. Delivery is
+  both push (`context --focus/--from-git/--task`, where `--task` seeds the pack
+  from a prose description — named symbols first, lexical matches as labeled
+  hints) and pull (the `pyvisualizer-mcp` server, so the agent queries the graph
+  mid-task). Hybrid lexical+graph ranking ships behind `--task`/`--strategy`; it
+  becomes the headline default only after the pre-registered localization gate
+  (beat plain text search on function-recall per 1k tokens on a SWE-bench-style
+  harness) — until then we make no retrieval-quality claims for it.
 
 The unifying engine is one idea: **change → impacted subgraph → focused
 artifact.** Rendered for a human, that artifact is a review report. Rendered for
@@ -87,9 +94,9 @@ list rather than into the product.
 
 ## Later, deliberately (roadmap — not built yet, on purpose)
 
-- **MCP server** (`who_calls`, `what_breaks_if_i_change` as live agent tools) —
-  the always-on successor to the AGENTS.md convention. Deferred until the
-  convention proves the demand; a server is complexity we add only when earned.
+- ~~**MCP server**~~ — shipped as `pyvisualizer-mcp` (three tools:
+  `search_code`, `context_pack`, `impact`; optional `[mcp]` extra so the core
+  package stays dependency-light).
 - **Incremental AST caching** for very large monorepos — determinism-safe,
   keyed on file content hash. Only when real repos hit a real speed wall.
 - **Coverage overlay** (`--coverage coverage.xml`) joining churn on the existing

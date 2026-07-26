@@ -74,7 +74,7 @@ py-code-visualizer export --check .   # fails if committed graph is stale
 
 - Task: add retry logic to the HTTP client
 - Included functions: 7
-- Estimated size: ~3,900 tokens (vs ~139,697 tokens full source) — 97.2% smaller
+- Estimated size: ~4,000 tokens (vs ~139,697 tokens full source) — 97% smaller
 
 ## Seeds (task → code, best match first)
 - `client.send_request` — 182.3 · symbol

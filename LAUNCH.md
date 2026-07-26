@@ -131,7 +131,7 @@ one that *exists*. Show a real ambiguous case and how guessing invents an edge.]
 Paste real command output from the repo fixtures.]
 
 ### The AI angle: point your agent at the graph, not the repo
-[Show the context command and the ~96%-smaller measured number; explain fewer
+[Show the context command and the 97%-smaller measured number; explain fewer
 tokens + no hallucinated structure.]
 
 ### Try it on your own code in 30 seconds

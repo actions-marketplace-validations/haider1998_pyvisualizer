@@ -2,51 +2,79 @@
    PyVisualizer Website - Premium CSS Design
    ============================================ */
 
-/* CSS Custom Properties */
+/* CSS Custom Properties
+   ------------------------------------------------------------------
+   The palette is the tool's own vocabulary. Every call edge this
+   project emits is labelled resolved / inherited / ambiguous, so those
+   three confidence levels ARE the semantic colour system — verified
+   green, inherited amber, ambiguous rust. Neutrals carry a slight
+   green bias so they read as chosen rather than inherited grey.
+   ------------------------------------------------------------------ */
 :root {
-    /* Colors */
-    --primary: #5D2E8C;
-    --primary-light: #7B4BA9;
-    --primary-dark: #3D1D5C;
-    --secondary: #2962FF;
-    --secondary-light: #5C8AFF;
-    --accent: #00C853;
-    --accent-light: #4CDE80;
-    --warning: #FF6D00;
-    --danger: #E53935;
+    /* Brand — "resolved" green */
+    --primary: #14624A;
+    --primary-light: #1C8462;
+    --primary-dark: #0C3E2F;
+    --secondary: #275E6E;
+    --secondary-light: #3B8095;
+    --accent: #14624A;
+    --accent-light: #1C8462;
+    --warning: #8A5C0A;
+    --danger: #8C3322;
 
-    /* Neutrals */
-    --gray-50: #F8F9FA;
-    --gray-100: #F1F3F5;
-    --gray-200: #E9ECEF;
-    --gray-300: #DEE2E6;
-    --gray-400: #CED4DA;
-    --gray-500: #ADB5BD;
-    --gray-600: #6C757D;
-    --gray-700: #495057;
-    --gray-800: #343A40;
-    --gray-900: #212529;
+    /* Confidence semantics — mirrors CONFIDENCE_* in pyvisualizer/core/model.py */
+    --confidence-resolved: #14624A;
+    --confidence-inherited: #8A5C0A;
+    --confidence-ambiguous: #8C3322;
+
+    /* Neutrals — green-biased, not pure grey */
+    --gray-50: #F7F8F5;
+    --gray-100: #EFF1EC;
+    --gray-200: #E3E6DF;
+    --gray-300: #D3D8CE;
+    --gray-400: #B4BBB1;
+    --gray-500: #8B948B;
+    --gray-600: #5F6963;
+    --gray-700: #414A45;
+    --gray-800: #2A322E;
+    --gray-900: #161A18;
 
     /* Theme colors */
     --bg-primary: #FFFFFF;
-    --bg-secondary: #F8F9FA;
-    --bg-tertiary: #F1F3F5;
+    --bg-secondary: #F7F8F5;
+    --bg-tertiary: #EFF1EC;
     --bg-card: #FFFFFF;
-    --text-primary: #212529;
-    --text-secondary: #6C757D;
-    --text-muted: #ADB5BD;
-    --border-color: #E9ECEF;
-    --shadow-color: rgba(0, 0, 0, 0.08);
-    --shadow-color-strong: rgba(0, 0, 0, 0.15);
+    --text-primary: #161A18;
+    --text-secondary: #5F6963;
+    --text-muted: #79837C;
+    --border-color: #E3E6DF;
+    --shadow-color: rgba(20, 40, 32, 0.07);
+    --shadow-color-strong: rgba(20, 40, 32, 0.14);
 
-    /* Aurora colors */
-    --aurora-1: rgba(93, 46, 140, 0.3);
-    --aurora-2: rgba(41, 98, 255, 0.25);
-    --aurora-3: rgba(0, 200, 83, 0.2);
+    /* Tinted surfaces — theme-safe replacements for hard-coded rgba() */
+    --surface-sunken: #F7F8F5;
+    --surface-raised: #FFFFFF;
+    --rule-soft: rgba(22, 26, 24, 0.09);
+    --accent-wash: rgba(20, 98, 74, 0.07);
+
+    /* Terminal surface — identical in both themes on purpose: a terminal
+       is a terminal. Tokenised so pages stop hard-coding #0d1117. */
+    --term-bg: #10221C;
+    --term-fg: #DCE8E2;
+    --term-border: #24443A;
+    --term-prompt: #4FBF95;
+    --term-ok: #4FBF95;
+    --term-warn: #D9A441;
+    --term-bad: #E3866F;
+
+    /* Ambient wash (index hero) — single hue, low saturation */
+    --aurora-1: rgba(20, 98, 74, 0.16);
+    --aurora-2: rgba(39, 94, 110, 0.12);
+    --aurora-3: rgba(20, 98, 74, 0.08);
 
     /* Gradients */
     --gradient-primary: linear-gradient(135deg, var(--primary), var(--secondary));
-    --gradient-hero: linear-gradient(135deg, #5D2E8C 0%, #2962FF 50%, #00C853 100%);
+    --gradient-hero: linear-gradient(120deg, #14624A 0%, #275E6E 100%);
 
     /* Typography */
     --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
@@ -82,22 +110,45 @@
     --z-tooltip: 400;
 }
 
-/* Dark mode */
+/* Dark mode — the green lightens so it keeps working on a dark ground.
+   Every token defined in :root that carries colour is redefined here;
+   components must reference tokens only, never a literal. */
 [data-theme="dark"] {
-    --bg-primary: #0D1117;
-    --bg-secondary: #161B22;
-    --bg-tertiary: #21262D;
-    --bg-card: #161B22;
-    --text-primary: #F0F6FC;
-    --text-secondary: #8B949E;
-    --text-muted: #6E7681;
-    --border-color: #30363D;
-    --shadow-color: rgba(0, 0, 0, 0.3);
-    --shadow-color-strong: rgba(0, 0, 0, 0.5);
+    --primary: #4FBF95;
+    --primary-light: #6FD3AE;
+    --primary-dark: #2E9873;
+    --secondary: #6FB3C7;
+    --secondary-light: #8FC9D9;
+    --accent: #4FBF95;
+    --accent-light: #6FD3AE;
+    --warning: #D9A441;
+    --danger: #E3866F;
 
-    --aurora-1: rgba(93, 46, 140, 0.4);
-    --aurora-2: rgba(41, 98, 255, 0.35);
-    --aurora-3: rgba(0, 200, 83, 0.3);
+    --confidence-resolved: #4FBF95;
+    --confidence-inherited: #D9A441;
+    --confidence-ambiguous: #E3866F;
+
+    --bg-primary: #0C110F;
+    --bg-secondary: #121815;
+    --bg-tertiary: #1A211D;
+    --bg-card: #121815;
+    --text-primary: #E9EFEB;
+    --text-secondary: #9AA69F;
+    --text-muted: #7C8880;
+    --border-color: #263029;
+    --shadow-color: rgba(0, 0, 0, 0.36);
+    --shadow-color-strong: rgba(0, 0, 0, 0.55);
+
+    --surface-sunken: #121815;
+    --surface-raised: #1A211D;
+    --rule-soft: rgba(233, 239, 235, 0.11);
+    --accent-wash: rgba(79, 191, 149, 0.10);
+
+    --aurora-1: rgba(79, 191, 149, 0.20);
+    --aurora-2: rgba(111, 179, 199, 0.14);
+    --aurora-3: rgba(79, 191, 149, 0.10);
+
+    --gradient-hero: linear-gradient(120deg, #4FBF95 0%, #6FB3C7 100%);
 }
 
 /* ============================================
@@ -181,7 +232,7 @@ code {
     left: 0;
     right: 0;
     z-index: var(--z-sticky);
-    background: rgba(255, 255, 255, 0.8);
+    background: rgba(255, 255, 255, 0.82);
     backdrop-filter: blur(12px);
     -webkit-backdrop-filter: blur(12px);
     border-bottom: 1px solid var(--border-color);
@@ -189,7 +240,7 @@ code {
 }
 
 [data-theme="dark"] .nav {
-    background: rgba(13, 17, 23, 0.8);
+    background: rgba(12, 17, 15, 0.82);
 }
 
 .nav-container {
@@ -313,7 +364,7 @@ code {
         bottom: 0;
         height: calc(100vh - 64px);
         display: flex !important;
-        background: #f8f9fa;
+        background: #F7F8F5;
         /* Solid light mode background */
         flex-direction: column;
         padding: var(--space-xl);
@@ -327,7 +378,7 @@ code {
     }
 
     [data-theme="dark"] .nav-menu {
-        background: #0f0f10;
+        background: #0C110F;
         /* Solid dark mode background */
         box-shadow: -10px 0 30px rgba(0, 0, 0, 0.3);
     }
@@ -555,12 +606,12 @@ code {
 .btn-primary {
     background: var(--gradient-primary);
     color: white;
-    box-shadow: 0 4px 14px rgba(93, 46, 140, 0.3);
+    box-shadow: 0 4px 14px var(--shadow-color-strong);
 }
 
 .btn-primary:hover {
     transform: translateY(-2px);
-    box-shadow: 0 6px 20px rgba(93, 46, 140, 0.4);
+    box-shadow: 0 6px 20px var(--shadow-color-strong);
     color: white;
 }
 
@@ -681,7 +732,7 @@ code {
 .section-badge {
     display: inline-block;
     padding: var(--space-xs) var(--space-md);
-    background: rgba(93, 46, 140, 0.1);
+    background: var(--accent-wash);
     color: var(--primary);
     font-size: 0.85rem;
     font-weight: 600;
@@ -690,7 +741,7 @@ code {
 }
 
 [data-theme="dark"] .section-badge {
-    background: rgba(93, 46, 140, 0.2);
+    background: var(--accent-wash);
 }
 
 .section-title {
@@ -739,14 +790,14 @@ code {
     justify-content: center;
     width: 56px;
     height: 56px;
-    background: rgba(93, 46, 140, 0.1);
+    background: var(--accent-wash);
     border-radius: var(--radius-lg);
     margin-bottom: var(--space-lg);
     color: var(--icon-color, var(--primary));
 }
 
 [data-theme="dark"] .feature-icon {
-    background: rgba(93, 46, 140, 0.2);
+    background: var(--accent-wash);
 }
 
 .feature-card h3 {
@@ -968,7 +1019,7 @@ code {
     font-weight: 800;
     font-size: 1.25rem;
     border-radius: var(--radius-lg);
-    box-shadow: 0 4px 14px rgba(93, 46, 140, 0.3);
+    box-shadow: 0 4px 14px var(--shadow-color-strong);
 }
 
 .step-content {
@@ -1129,14 +1180,14 @@ code {
 .comparison-callout {
     display: flex;
     gap: var(--space-lg);
-    background: rgba(93, 46, 140, 0.05);
-    border: 1px solid rgba(93, 46, 140, 0.2);
+    background: var(--accent-wash);
+    border: 1px solid var(--border-color);
     border-radius: var(--radius-xl);
     padding: var(--space-xl);
 }
 
 [data-theme="dark"] .comparison-callout {
-    background: rgba(93, 46, 140, 0.1);
+    background: var(--accent-wash);
 }
 
 .callout-icon {
@@ -1616,4 +1667,185 @@ code {
         padding: var(--space-sm) var(--space-md);
         font-size: 0.875rem;
     }
+}
+/* ============================================
+   Brand mark
+   The nav/footer logo is inline SVG using currentColor so it inverts
+   with the theme. The 5.5 MB PNG is no longer loaded on any page.
+   ============================================ */
+.brand-mark {
+    width: 26px;
+    height: 29px;
+    flex: 0 0 auto;
+    color: var(--primary);
+    display: block;
+}
+
+.nav-logo {
+    text-decoration: none;
+}
+
+.nav-logo .brand-word {
+    font-family: var(--font-mono);
+    font-size: 0.95rem;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    color: var(--text-primary);
+    white-space: nowrap;
+}
+
+@media (max-width: 420px) {
+    .nav-logo .brand-word {
+        font-size: 0.82rem;
+    }
+}
+
+/* ============================================
+   Shared utilities
+   These exist so pages stop reaching for inline rgba() literals that
+   only work in one theme. Anything a content page needs should be a
+   token or a class here.
+   ============================================ */
+
+/* Wide content must scroll inside itself — the page body never does. */
+.scroll-x {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    margin: var(--space-md) 0;
+}
+
+.data-table {
+    width: 100%;
+    min-width: 520px;
+    border-collapse: collapse;
+    font-size: 0.85rem;
+    font-variant-numeric: tabular-nums;
+}
+
+.data-table th {
+    text-align: right;
+    padding: 0.5rem 0.6rem;
+    font-weight: 500;
+    color: var(--text-secondary);
+    border-bottom: 1px solid var(--border-color);
+    white-space: nowrap;
+}
+
+.data-table td {
+    text-align: right;
+    padding: 0.55rem 0.6rem;
+    border-bottom: 1px solid var(--rule-soft);
+    color: var(--text-secondary);
+}
+
+.data-table th:first-child,
+.data-table td:first-child {
+    text-align: left;
+    color: var(--text-primary);
+}
+
+.data-table tbody tr:last-child td {
+    border-bottom: 0;
+}
+
+/* The row that represents pyvisualizer's own result. */
+.data-table tr.is-ours td {
+    font-weight: 600;
+    color: var(--primary);
+    background: var(--accent-wash);
+}
+
+.data-table tr.is-ours td:first-child {
+    color: var(--text-primary);
+}
+
+/* Confidence chips — the product's own taxonomy, used as a legend. */
+.conf {
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    padding: 0.15em 0.5em;
+    border-radius: var(--radius-sm);
+    border: 1px solid currentColor;
+    white-space: nowrap;
+}
+
+.conf-resolved {
+    color: var(--confidence-resolved);
+}
+
+.conf-inherited {
+    color: var(--confidence-inherited);
+}
+
+.conf-ambiguous {
+    color: var(--confidence-ambiguous);
+}
+
+.footnote {
+    font-size: 0.78rem;
+    line-height: 1.6;
+    color: var(--text-secondary);
+    margin: var(--space-md) 0 0;
+}
+
+/* Site footer — one pattern across every page. */
+.site-footer {
+    border-top: 1px solid var(--border-color);
+    background: var(--bg-secondary);
+    padding: var(--space-2xl) 0;
+    margin-top: var(--space-4xl);
+}
+
+.site-footer .footer-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-xl);
+    align-items: flex-start;
+    justify-content: space-between;
+}
+
+.site-footer .footer-id {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+}
+
+.site-footer .footer-id .brand-word {
+    font-family: var(--font-mono);
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.site-footer nav {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-lg);
+}
+
+.site-footer nav a {
+    font-size: 0.875rem;
+    color: var(--text-secondary);
+}
+
+.site-footer nav a:hover {
+    color: var(--primary);
+}
+
+.site-footer .footer-legal {
+    margin-top: var(--space-xl);
+    padding-top: var(--space-lg);
+    border-top: 1px solid var(--rule-soft);
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-sm) var(--space-md);
+    justify-content: space-between;
+}
+
+.site-footer .footer-legal a {
+    color: var(--text-secondary);
 }

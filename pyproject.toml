@@ -79,10 +79,11 @@ pyvisualizer = "pyvisualizer.cli:main"
 pyvisualizer-mcp = "pyvisualizer.mcp_server:main"
 
 [project.urls]
-Homepage = "https://github.com/haider1998/PyVisualizer"
-Documentation = "https://github.com/haider1998/PyVisualizer#readme"
+Homepage = "https://haider1998.github.io/pyvisualizer/"
+Documentation = "https://haider1998.github.io/pyvisualizer/"
 Repository = "https://github.com/haider1998/PyVisualizer"
 Issues = "https://github.com/haider1998/PyVisualizer/issues"
+Changelog = "https://github.com/haider1998/PyVisualizer/releases"
 
 [tool.setuptools.packages.find]
 where = ["."]
